@@ -37,6 +37,7 @@ import jadx.core.dex.attributes.IAttributeNode;
 import jadx.core.dex.nodes.ClassNode;
 import jadx.core.dex.nodes.MethodNode;
 import jadx.core.dex.nodes.RootNode;
+import jadx.core.utils.DebugChecks;
 import jadx.core.utils.files.FileUtils;
 import jadx.core.xmlgen.ResourceStorage;
 import jadx.core.xmlgen.entry.ResourceEntry;
@@ -86,6 +87,7 @@ public abstract class IntegrationTest extends TestUtils {
 
 	private boolean allowWarnInCode;
 	private boolean printLineNumbers;
+	private boolean printSmali;
 
 	private DynamicCompiler dynamicCompiler;
 
@@ -95,6 +97,9 @@ public abstract class IntegrationTest extends TestUtils {
 				AType.JADX_ERROR,
 				AType.JADX_WARN,
 				AType.COMMENTS));
+
+		// enable debug checks
+		DebugChecks.checksEnabled = true;
 	}
 
 	@BeforeEach
@@ -156,7 +161,7 @@ public abstract class IntegrationTest extends TestUtils {
 	}
 
 	protected JadxDecompiler loadFiles(List<File> inputFiles) {
-		JadxDecompiler d = null;
+		JadxDecompiler d;
 		try {
 			args.setInputFiles(inputFiles);
 			d = new JadxDecompiler(args);
@@ -188,9 +193,19 @@ public abstract class IntegrationTest extends TestUtils {
 		}
 		System.out.println("-----------------------------------------------------------");
 
+		if (printSmali) {
+			clsList.forEach(this::printSmali);
+		}
+
 		clsList.forEach(this::checkCode);
 		compile(clsList);
 		clsList.forEach(this::runAutoCheck);
+	}
+
+	private void printSmali(ClassNode cls) {
+		System.out.println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+		System.out.println(cls.getSmali());
+		System.out.println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
 	}
 
 	private void printCodeWithLineNumbers(ICodeInfo code) {
@@ -486,6 +501,12 @@ public abstract class IntegrationTest extends TestUtils {
 	protected void outputCFG() {
 		this.args.setCfgOutput(true);
 		this.args.setRawCFGOutput(true);
+	}
+
+	// Use only for debug purpose
+	@Deprecated
+	protected void printSmali() {
+		this.printSmali = true;
 	}
 
 	// Use only for debug purpose

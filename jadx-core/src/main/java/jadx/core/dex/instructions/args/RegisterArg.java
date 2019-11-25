@@ -125,6 +125,7 @@ public class RegisterArg extends InsnArg implements Named {
 	public RegisterArg duplicate(int regNum, @Nullable SSAVar sVar) {
 		RegisterArg dup = new RegisterArg(regNum, getInitType());
 		if (sVar != null) {
+			// only 'set' here, 'assign' or 'use' will binds later
 			dup.setSVar(sVar);
 		}
 		return copyCommonParams(dup);
@@ -143,12 +144,22 @@ public class RegisterArg extends InsnArg implements Named {
 	}
 
 	public boolean sameRegAndSVar(InsnArg arg) {
+		if (this == arg) {
+			return true;
+		}
 		if (!arg.isRegister()) {
 			return false;
 		}
 		RegisterArg reg = (RegisterArg) arg;
 		return regNum == reg.getRegNum()
 				&& Objects.equals(sVar, reg.getSVar());
+	}
+
+	public boolean sameReg(InsnArg arg) {
+		if (!arg.isRegister()) {
+			return false;
+		}
+		return regNum == ((RegisterArg) arg).getRegNum();
 	}
 
 	public boolean sameCodeVar(RegisterArg arg) {
