@@ -280,7 +280,7 @@ public class ClassNode extends LineAttrNode implements ILoadable, ICodeNode {
 		String clsRawName = topParentClass.getRawName();
 		if (searchInCache) {
 			ICodeInfo code = codeCache.get(clsRawName);
-			if (code != null) {
+			if (code != null && code != ICodeInfo.EMPTY) {
 				return code;
 			}
 		}
@@ -525,10 +525,6 @@ public class ClassNode extends LineAttrNode implements ILoadable, ICodeNode {
 
 	public String getFullName() {
 		return clsInfo.getAliasFullName();
-	}
-
-	public String getRealFullName() {
-		return clsInfo.getType().getObject();
 	}
 
 	public String getPackage() {

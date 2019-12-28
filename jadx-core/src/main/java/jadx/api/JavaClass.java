@@ -66,11 +66,14 @@ public final class JavaClass implements JavaNode {
 		listsLoaded = false;
 	}
 
+	/**
+	 * Internal API. Not Stable!
+	 */
 	public ClassNode getClassNode() {
 		return cls;
 	}
 
-	private void loadLists() {
+	private synchronized void loadLists() {
 		if (listsLoaded) {
 			return;
 		}
@@ -174,8 +177,8 @@ public final class JavaClass implements JavaNode {
 		return cls.getFullName();
 	}
 
-	public String getRealFullName() {
-		return cls.getRealFullName();
+	public String getRawName() {
+		return cls.getRawName();
 	}
 
 	public String getPackage() {
