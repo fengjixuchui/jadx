@@ -15,6 +15,7 @@ import jadx.core.dex.attributes.nodes.ForceReturnAttr;
 import jadx.core.dex.attributes.nodes.LoopLabelAttr;
 import jadx.core.dex.info.ClassInfo;
 import jadx.core.dex.instructions.SwitchNode;
+import jadx.core.dex.instructions.args.ArgType;
 import jadx.core.dex.instructions.args.CodeVar;
 import jadx.core.dex.instructions.args.InsnArg;
 import jadx.core.dex.instructions.args.NamedArg;
@@ -39,7 +40,6 @@ import jadx.core.dex.regions.loops.LoopRegion;
 import jadx.core.dex.regions.loops.LoopType;
 import jadx.core.dex.trycatch.ExceptionHandler;
 import jadx.core.utils.BlockUtils;
-import jadx.core.utils.ErrorsCounter;
 import jadx.core.utils.RegionUtils;
 import jadx.core.utils.exceptions.CodegenException;
 import jadx.core.utils.exceptions.JadxRuntimeException;
@@ -182,18 +182,6 @@ public class RegionGen extends InsnGen {
 	}
 
 	private CodeWriter makeLoop(LoopRegion region, CodeWriter code) throws CodegenException {
-		BlockNode header = region.getHeader();
-		if (header != null) {
-			List<InsnNode> headerInsns = header.getInstructions();
-			if (headerInsns.size() > 1) {
-				ErrorsCounter.methodWarn(mth, "Found not inlined instructions from loop header");
-				int last = headerInsns.size() - 1;
-				for (int i = 0; i < last; i++) {
-					InsnNode insn = headerInsns.get(i);
-					makeInsn(insn, code);
-				}
-			}
-		}
 		LoopLabelAttr labelAttr = region.getInfo().getStart().get(AType.LOOP_LABEL);
 		if (labelAttr != null) {
 			code.startLine(mgen.getNameGen().getLoopLabel(labelAttr)).add(':');
@@ -347,7 +335,7 @@ public class RegionGen extends InsnGen {
 		}
 		code.startLine("} catch (");
 		if (handler.isCatchAll()) {
-			code.add("Throwable");
+			useClass(code, ArgType.THROWABLE);
 		} else {
 			Iterator<ClassInfo> it = handler.getCatchTypes().iterator();
 			if (it.hasNext()) {
@@ -360,11 +348,15 @@ public class RegionGen extends InsnGen {
 		}
 		code.add(' ');
 		InsnArg arg = handler.getArg();
-		if (arg instanceof RegisterArg) {
+		if (arg == null) {
+			code.add("unknown"); // throwing exception is too late at this point
+		} else if (arg instanceof RegisterArg) {
 			RegisterArg reg = (RegisterArg) arg;
 			code.add(mgen.getNameGen().assignArg(reg.getSVar().getCodeVar()));
 		} else if (arg instanceof NamedArg) {
 			code.add(mgen.getNameGen().assignNamedArg((NamedArg) arg));
+		} else {
+			throw new JadxRuntimeException("Unexpected arg type in catch block: " + arg + ", class: " + arg.getClass().getSimpleName());
 		}
 		code.add(") {");
 		makeRegionIndent(code, region);

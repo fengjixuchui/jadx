@@ -43,6 +43,7 @@ import jadx.core.dex.visitors.JadxVisitor;
 import jadx.core.dex.visitors.blocksmaker.BlockSplitter;
 import jadx.core.dex.visitors.ssa.SSATransform;
 import jadx.core.utils.BlockUtils;
+import jadx.core.utils.InsnUtils;
 import jadx.core.utils.Utils;
 
 @JadxVisitor(
@@ -74,27 +75,24 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 		if (Consts.DEBUG) {
 			LOG.info("Start type inference in method: {}", mth);
 		}
-		boolean resolved = runTypePropagation(mth);
-		if (!resolved) {
-			boolean moveAdded = false;
-			for (SSAVar var : new ArrayList<>(mth.getSVars())) {
-				if (tryInsertAdditionalInsn(mth, var)) {
-					moveAdded = true;
-				}
-			}
-			if (moveAdded) {
-				InitCodeVariables.rerun(mth);
-				resolved = runTypePropagation(mth);
-			}
-			if (!resolved) {
-				resolved = runMultiVariableSearch(mth);
-			}
-		}
-		if (resolved) {
+		if (resolveTypes(mth)) {
 			for (SSAVar var : new ArrayList<>(mth.getSVars())) {
 				processIncompatiblePrimitives(mth, var);
 			}
 		}
+	}
+
+	private boolean resolveTypes(MethodNode mth) {
+		if (runTypePropagation(mth)) {
+			return true;
+		}
+		if (trySplitConstInsns(mth)) {
+			return true;
+		}
+		if (tryInsertAdditionalMove(mth)) {
+			return true;
+		}
+		return runMultiVariableSearch(mth);
 	}
 
 	/**
@@ -354,6 +352,64 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 		return false;
 	}
 
+	private boolean trySplitConstInsns(MethodNode mth) {
+		boolean constSplitted = false;
+		for (SSAVar var : new ArrayList<>(mth.getSVars())) {
+			if (checkAndSplitConstInsn(mth, var)) {
+				constSplitted = true;
+			}
+		}
+		if (!constSplitted) {
+			return false;
+		}
+		InitCodeVariables.rerun(mth);
+		return runTypePropagation(mth);
+	}
+
+	private boolean checkAndSplitConstInsn(MethodNode mth, SSAVar var) {
+		if (var.getUsedInPhi().size() < 2) {
+			return false;
+		}
+		InsnNode assignInsn = var.getAssign().getAssignInsn();
+		InsnNode constInsn = InsnUtils.checkInsnType(assignInsn, InsnType.CONST);
+		if (constInsn == null) {
+			return false;
+		}
+		BlockNode blockNode = BlockUtils.getBlockByInsn(mth, constInsn);
+		if (blockNode == null) {
+			return false;
+		}
+		// for every PHI make separate CONST insn
+		boolean first = true;
+		for (PhiInsn phiInsn : var.getUsedInPhi()) {
+			if (first) {
+				first = false;
+				continue;
+			}
+			InsnNode copyInsn = constInsn.copyWithNewSsaVar(mth);
+			copyInsn.add(AFlag.SYNTHETIC);
+			BlockUtils.insertAfterInsn(blockNode, constInsn, copyInsn);
+
+			RegisterArg phiArg = phiInsn.getArgBySsaVar(var);
+			phiInsn.replaceArg(phiArg, copyInsn.getResult().duplicate());
+		}
+		return true;
+	}
+
+	private boolean tryInsertAdditionalMove(MethodNode mth) {
+		boolean moveAdded = false;
+		for (SSAVar var : new ArrayList<>(mth.getSVars())) {
+			if (tryInsertAdditionalInsn(mth, var)) {
+				moveAdded = true;
+			}
+		}
+		if (!moveAdded) {
+			return false;
+		}
+		InitCodeVariables.rerun(mth);
+		return runTypePropagation(mth);
+	}
+
 	/**
 	 * Add MOVE instruction before PHI in bound blocks to make 'soft' type link.
 	 * This allows to use different types in blocks merged by PHI.
@@ -404,7 +460,7 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 				if (apply) {
 					int regNum = reg.getRegNum();
 					RegisterArg resultArg = reg.duplicate(regNum, null);
-					SSAVar newSsaVar = mth.makeNewSVar(regNum, resultArg);
+					SSAVar newSsaVar = mth.makeNewSVar(resultArg);
 					RegisterArg arg = reg.duplicate(regNum, var);
 
 					InsnNode moveInsn = new InsnNode(InsnType.MOVE, 1);
@@ -476,7 +532,7 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 					castNode.addArg(bound.getArg());
 					castNode.setResult(InsnArg.reg(bound.getArg().getRegNum(), bound.getType()));
 
-					SSAVar newVar = mth.makeNewSVar(castNode.getResult().getRegNum(), castNode.getResult());
+					SSAVar newVar = mth.makeNewSVar(castNode.getResult());
 					CodeVar codeVar = new CodeVar();
 					codeVar.setType(bound.getType());
 					newVar.setCodeVar(codeVar);

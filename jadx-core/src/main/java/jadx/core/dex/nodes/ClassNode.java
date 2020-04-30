@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.jetbrains.annotations.Nullable;
@@ -25,7 +26,7 @@ import jadx.core.Consts;
 import jadx.core.ProcessClass;
 import jadx.core.dex.attributes.AFlag;
 import jadx.core.dex.attributes.annotations.Annotation;
-import jadx.core.dex.attributes.nodes.LineAttrNode;
+import jadx.core.dex.attributes.nodes.NotificationAttrNode;
 import jadx.core.dex.attributes.nodes.SourceFileAttr;
 import jadx.core.dex.info.AccessInfo;
 import jadx.core.dex.info.AccessInfo.AFType;
@@ -45,7 +46,7 @@ import jadx.core.utils.exceptions.JadxRuntimeException;
 import static jadx.core.dex.nodes.ProcessState.LOADED;
 import static jadx.core.dex.nodes.ProcessState.NOT_LOADED;
 
-public class ClassNode extends LineAttrNode implements ILoadable, ICodeNode {
+public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeNode {
 	private static final Logger LOG = LoggerFactory.getLogger(ClassNode.class);
 
 	private final DexNode dex;
@@ -194,6 +195,10 @@ public class ClassNode extends LineAttrNode implements ILoadable, ICodeNode {
 		root().getConstValues().processConstFields(this, staticFields);
 	}
 
+	/**
+	 * Class signature format:
+	 * https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.9.1
+	 */
 	private void parseClassSignature() {
 		SignatureParser sp = SignatureParser.fromNode(this);
 		if (sp == null) {
@@ -203,7 +208,7 @@ public class ClassNode extends LineAttrNode implements ILoadable, ICodeNode {
 			// parse class generic map
 			generics = sp.consumeGenericTypeParameters();
 			// parse super class signature
-			superClass = sp.consumeType();
+			superClass = validateSuperCls(sp.consumeType(), superClass);
 			// parse interfaces signatures
 			for (int i = 0; i < interfaces.size(); i++) {
 				ArgType type = sp.consumeType();
@@ -216,6 +221,18 @@ public class ClassNode extends LineAttrNode implements ILoadable, ICodeNode {
 		} catch (Exception e) {
 			LOG.error("Class signature parse error: {}", this, e);
 		}
+	}
+
+	private ArgType validateSuperCls(ArgType candidateType, ArgType currentType) {
+		if (!candidateType.isObject()) {
+			this.addComment("Incorrect class signature, super class is not object: " + SignatureParser.getSignature(this));
+			return currentType;
+		}
+		if (Objects.equals(candidateType.getObject(), this.getClassInfo().getType().getObject())) {
+			this.addComment("Incorrect class signature, super class is equals to this class: " + SignatureParser.getSignature(this));
+			return currentType;
+		}
+		return candidateType;
 	}
 
 	private void setFieldsTypesFromSignature() {
