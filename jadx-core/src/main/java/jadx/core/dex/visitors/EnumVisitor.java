@@ -19,6 +19,7 @@ import jadx.core.dex.attributes.AFlag;
 import jadx.core.dex.attributes.AType;
 import jadx.core.dex.attributes.nodes.EnumClassAttr;
 import jadx.core.dex.attributes.nodes.EnumClassAttr.EnumField;
+import jadx.core.dex.attributes.nodes.SkipMethodArgsAttr;
 import jadx.core.dex.info.AccessInfo;
 import jadx.core.dex.info.ClassInfo;
 import jadx.core.dex.info.FieldInfo;
@@ -44,7 +45,6 @@ import jadx.core.dex.visitors.shrink.CodeShrinkVisitor;
 import jadx.core.utils.BlockInsnPair;
 import jadx.core.utils.InsnRemover;
 import jadx.core.utils.InsnUtils;
-import jadx.core.utils.Utils;
 import jadx.core.utils.exceptions.JadxException;
 
 import static jadx.core.utils.InsnUtils.checkInsnType;
@@ -169,18 +169,9 @@ public class EnumVisitor extends AbstractVisitor {
 					&& cls.root().getArgs().isRenameValid()) {
 				fieldNode.getFieldInfo().setAlias(name);
 			}
-			if (!co.getClassType().equals(cls.getClassInfo())) {
-				// enum contains additional methods
-				for (ClassNode innerCls : cls.getInnerClasses()) {
-					processEnumInnerCls(co, enumField, innerCls);
-				}
-			}
 			fieldNode.add(AFlag.DONT_GENERATE);
+			processConstructorInsn(cls, enumField, classInitMth, staticBlock);
 		}
-
-		List<InsnNode> constrInsns = Utils.collectionMap(attr.getFields(), EnumField::getConstrInsn);
-		InsnRemover.removeAllWithoutUnbind(staticBlock, constrInsns);
-
 		valuesField.add(AFlag.DONT_GENERATE);
 		InsnRemover.removeAllAndUnbind(classInitMth, staticBlock, toRemove);
 		if (classInitMth.countInsns() == 0) {
@@ -188,6 +179,28 @@ public class EnumVisitor extends AbstractVisitor {
 		}
 		removeEnumMethods(cls, clsType, valuesField);
 		return true;
+	}
+
+	private void processConstructorInsn(ClassNode cls, EnumField enumField, MethodNode classInitMth, BlockNode staticBlock) {
+		ConstructorInsn co = enumField.getConstrInsn();
+		ClassInfo enumClsInfo = co.getClassType();
+		if (!enumClsInfo.equals(cls.getClassInfo())) {
+			ClassNode enumCls = cls.root().resolveClass(enumClsInfo);
+			if (enumCls != null) {
+				processEnumCls(enumField, enumCls);
+				cls.addInlinedClass(enumCls);
+			}
+		}
+		List<RegisterArg> regs = new ArrayList<>();
+		co.getRegisterArgs(regs);
+		if (!regs.isEmpty()) {
+			cls.addWarnComment("Init of enum " + enumField.getField().getName() + " can be incorrect");
+		}
+		MethodNode ctrMth = cls.dex().resolveMethod(co.getCallMth());
+		if (ctrMth != null) {
+			markArgsForSkip(ctrMth);
+		}
+		InsnRemover.removeWithoutUnbind(classInitMth, staticBlock, co);
 	}
 
 	private BlockInsnPair getValuesInitInsn(MethodNode classInitMth, FieldNode valuesField) {
@@ -287,8 +300,11 @@ public class EnumVisitor extends AbstractVisitor {
 		if (!clsInfo.equals(cls.getClassInfo()) && !constrCls.getAccessFlags().isEnum()) {
 			return null;
 		}
-		int startArg = co.getArgsCount() == 1 ? 1 : 2;
-		return new EnumField(enumFieldNode, co, startArg);
+		MethodNode ctrMth = cls.dex().resolveMethod(co.getCallMth());
+		if (ctrMth == null) {
+			return null;
+		}
+		return new EnumField(enumFieldNode, co);
 	}
 
 	@Nullable
@@ -306,10 +322,7 @@ public class EnumVisitor extends AbstractVisitor {
 	}
 
 	private void removeEnumMethods(ClassNode cls, ArgType clsType, FieldNode valuesField) {
-		String enumConstructor = "<init>(Ljava/lang/String;I)V";
-		String enumConstructorAlt = "<init>(Ljava/lang/String;)V";
 		String valuesMethod = "values()" + TypeGen.signature(ArgType.array(clsType));
-
 		FieldInfo valuesFieldInfo = valuesField.getFieldInfo();
 
 		// remove compiler generated methods
@@ -319,18 +332,35 @@ public class EnumVisitor extends AbstractVisitor {
 				continue;
 			}
 			String shortId = mi.getShortId();
-			boolean isSynthetic = mth.getAccessFlags().isSynthetic();
-			if (mi.isConstructor() && !isSynthetic) {
-				if (shortId.equals(enumConstructor)
-						|| shortId.equals(enumConstructorAlt)) {
+			if (mi.isConstructor()) {
+				if (isDefaultConstructor(mth, shortId)) {
 					mth.add(AFlag.DONT_GENERATE);
 				}
+				markArgsForSkip(mth);
 			} else if (shortId.equals(valuesMethod)
 					|| usesValuesField(mth, valuesFieldInfo)
 					|| simpleValueOfMth(mth, clsType)) {
 				mth.add(AFlag.DONT_GENERATE);
 			}
 		}
+	}
+
+	private void markArgsForSkip(MethodNode mth) {
+		// skip first and second args
+		SkipMethodArgsAttr.skipArg(mth, 0);
+		if (mth.getMethodInfo().getArgsCount() > 1) {
+			SkipMethodArgsAttr.skipArg(mth, 1);
+		}
+	}
+
+	private boolean isDefaultConstructor(MethodNode mth, String shortId) {
+		boolean defaultId = shortId.equals("<init>(Ljava/lang/String;I)V")
+				|| shortId.equals("<init>(Ljava/lang/String;)V");
+		if (defaultId) {
+			// check content
+			return mth.countInsns() == 0;
+		}
+		return false;
 	}
 
 	private boolean simpleValueOfMth(MethodNode mth, ArgType clsType) {
@@ -352,10 +382,7 @@ public class EnumVisitor extends AbstractVisitor {
 		return InsnUtils.searchInsn(mth, InsnType.SGET, insnTest) != null;
 	}
 
-	private static void processEnumInnerCls(ConstructorInsn co, EnumField field, ClassNode innerCls) {
-		if (!innerCls.getClassInfo().equals(co.getClassType())) {
-			return;
-		}
+	private static void processEnumCls(EnumField field, ClassNode innerCls) {
 		// remove constructor, because it is anonymous class
 		for (MethodNode innerMth : innerCls.getMethods()) {
 			if (innerMth.getAccessFlags().isConstructor()) {
