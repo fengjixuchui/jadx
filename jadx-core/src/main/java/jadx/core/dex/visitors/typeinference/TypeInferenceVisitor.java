@@ -92,7 +92,13 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 		if (tryInsertAdditionalMove(mth)) {
 			return true;
 		}
-		return runMultiVariableSearch(mth);
+		if (runMultiVariableSearch(mth)) {
+			return true;
+		}
+		if (tryRemoveGenerics(mth)) {
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -124,11 +130,15 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 	private boolean runMultiVariableSearch(MethodNode mth) {
 		TypeSearch typeSearch = new TypeSearch(mth);
 		try {
-			boolean success = typeSearch.run();
-			if (!success) {
+			if (!typeSearch.run()) {
 				mth.addWarn("Multi-variable type inference failed");
 			}
-			return success;
+			for (SSAVar var : mth.getSVars()) {
+				if (!var.getTypeInfo().getType().isTypeKnown()) {
+					return false;
+				}
+			}
+			return true;
 		} catch (Exception e) {
 			mth.addWarn("Multi-variable type inference failed. Error: " + Utils.getStackTrace(e));
 			return false;
@@ -298,15 +308,29 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 			return null;
 		}
 		if (insn instanceof BaseInvokeNode) {
-			IMethodDetails methodDetails = root.getMethodUtils().getMethodDetails((BaseInvokeNode) insn);
-			if (methodDetails != null) {
-				if (methodDetails.getArgTypes().stream().anyMatch(ArgType::containsTypeVariable)) {
-					// don't add const bound for generic type variables
-					return null;
-				}
+			TypeBoundInvokeUse invokeUseBound = makeInvokeUseBound(regArg, (BaseInvokeNode) insn);
+			if (invokeUseBound != null) {
+				return invokeUseBound;
 			}
 		}
 		return new TypeBoundConst(BoundEnum.USE, regArg.getInitType(), regArg);
+	}
+
+	private TypeBoundInvokeUse makeInvokeUseBound(RegisterArg regArg, BaseInvokeNode invoke) {
+		InsnArg instanceArg = invoke.getInstanceArg();
+		if (instanceArg == null || instanceArg == regArg) {
+			return null;
+		}
+		IMethodDetails methodDetails = root.getMethodUtils().getMethodDetails(invoke);
+		if (methodDetails == null) {
+			return null;
+		}
+		int argIndex = invoke.getArgIndex(regArg) - invoke.getFirstArgOffset();
+		ArgType argType = methodDetails.getArgTypes().get(argIndex);
+		if (!argType.containsTypeVariable()) {
+			return null;
+		}
+		return new TypeBoundInvokeUse(root, invoke, regArg, argType);
 	}
 
 	private boolean tryPossibleTypes(SSAVar var, ArgType type) {
@@ -348,6 +372,48 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 		// for objects try super types
 		if (tryWiderObjects(mth, var)) {
 			return true;
+		}
+		return false;
+	}
+
+	private boolean tryRemoveGenerics(MethodNode mth) {
+		boolean resolved = true;
+		for (SSAVar var : mth.getSVars()) {
+			ArgType type = var.getTypeInfo().getType();
+			if (!type.isTypeKnown() && !var.isTypeImmutable()
+					&& !tryRawType(mth, var)) {
+				resolved = false;
+			}
+		}
+		return resolved;
+	}
+
+	private boolean tryRawType(MethodNode mth, SSAVar var) {
+		Set<ArgType> objTypes = new LinkedHashSet<>();
+		for (ITypeBound bound : var.getTypeInfo().getBounds()) {
+			ArgType boundType = bound.getType();
+			if (boundType.isTypeKnown() && boundType.isObject()) {
+				objTypes.add(boundType);
+			}
+		}
+		if (objTypes.isEmpty()) {
+			return false;
+		}
+		for (ArgType objType : objTypes) {
+			if (checkRawType(mth, var, objType)) {
+				mth.addDebugComment("Type inference failed for " + var.toShortString() + "."
+						+ " Raw type applied. Possible types: " + Utils.listToString(objTypes));
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean checkRawType(MethodNode mth, SSAVar var, ArgType objType) {
+		if (objType.isObject() && objType.containsGeneric()) {
+			ArgType rawType = ArgType.object(objType.getObject());
+			TypeUpdateResult result = typeUpdate.applyWithWiderAllow(var, rawType);
+			return result == TypeUpdateResult.CHANGED;
 		}
 		return false;
 	}
@@ -507,7 +573,7 @@ public final class TypeInferenceVisitor extends AbstractVisitor {
 		}
 		ClspGraph clsp = mth.root().getClsp();
 		for (ArgType objType : objTypes) {
-			for (String ancestor : clsp.getAncestors(objType.getObject())) {
+			for (String ancestor : clsp.getSuperTypes(objType.getObject())) {
 				ArgType ancestorType = ArgType.object(ancestor);
 				TypeUpdateResult result = typeUpdate.applyWithWiderAllow(var, ancestorType);
 				if (result == TypeUpdateResult.CHANGED) {

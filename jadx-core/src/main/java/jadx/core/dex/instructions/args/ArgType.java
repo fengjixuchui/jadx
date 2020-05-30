@@ -5,12 +5,15 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import org.jetbrains.annotations.NotNull;
+
 import jadx.core.Consts;
 import jadx.core.dex.info.ClassInfo;
 import jadx.core.dex.nodes.ClassNode;
-import jadx.core.dex.nodes.DexNode;
 import jadx.core.dex.nodes.RootNode;
+import jadx.core.dex.visitors.typeinference.TypeCompareEnum;
 import jadx.core.utils.Utils;
+import jadx.core.utils.exceptions.JadxRuntimeException;
 
 public abstract class ArgType {
 	public static final ArgType INT = primitive(PrimitiveType.INT);
@@ -80,6 +83,8 @@ public abstract class ArgType {
 				return STRING;
 			case Consts.CLASS_CLASS:
 				return CLASS;
+			case Consts.CLASS_THROWABLE:
+				return THROWABLE;
 			default:
 				return new ObjectType(cleanObjectName);
 		}
@@ -113,7 +118,7 @@ public abstract class ArgType {
 		return new OuterGenericObject((GenericObject) genericOuterType, (ObjectType) innerType);
 	}
 
-	public static ArgType array(ArgType vtype) {
+	public static ArgType array(@NotNull ArgType vtype) {
 		return new ArrayArg(vtype);
 	}
 
@@ -578,11 +583,8 @@ public abstract class ArgType {
 		if (from.equals(to)) {
 			return false;
 		}
-		if (from.isObject() && to.isObject()
-				&& root.getClsp().isImplements(from.getObject(), to.getObject())) {
-			return false;
-		}
-		return true;
+		TypeCompareEnum result = root.getTypeUpdate().getTypeCompare().compareTypes(from, to);
+		return !result.isNarrow();
 	}
 
 	public static boolean isInstanceOf(RootNode root, ArgType type, ArgType of) {
@@ -644,6 +646,9 @@ public abstract class ArgType {
 	}
 
 	public static ArgType parse(String type) {
+		if (type == null || type.isEmpty()) {
+			throw new JadxRuntimeException("Failed to parse type string: " + type);
+		}
 		char f = type.charAt(0);
 		switch (f) {
 			case 'L':
@@ -739,12 +744,12 @@ public abstract class ArgType {
 		return false;
 	}
 
-	public static ArgType tryToResolveClassAlias(DexNode dex, ArgType type) {
+	public static ArgType tryToResolveClassAlias(RootNode root, ArgType type) {
 		if (!type.isObject() || type.isGenericType()) {
 			return type;
 		}
 
-		ClassNode cls = dex.resolveClass(type);
+		ClassNode cls = root.resolveClass(type);
 		if (cls == null) {
 			return type;
 		}

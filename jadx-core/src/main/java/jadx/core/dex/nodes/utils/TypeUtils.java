@@ -50,13 +50,14 @@ public class TypeUtils {
 	 */
 	@Nullable
 	public ArgType replaceClassGenerics(ArgType instanceType, ArgType typeWithGeneric) {
-		if (typeWithGeneric != null) {
-			Map<ArgType, ArgType> replaceMap = getTypeVariablesMapping(instanceType);
-			if (!replaceMap.isEmpty()) {
-				return replaceTypeVariablesUsingMap(typeWithGeneric, replaceMap);
-			}
+		if (typeWithGeneric == null) {
+			return null;
 		}
-		return null;
+		Map<ArgType, ArgType> replaceMap = getTypeVariablesMapping(instanceType);
+		if (replaceMap.isEmpty()) {
+			return null;
+		}
+		return replaceTypeVariablesUsingMap(typeWithGeneric, replaceMap);
 	}
 
 	public Map<ArgType, ArgType> getTypeVariablesMapping(ArgType clsType) {
@@ -110,8 +111,18 @@ public class TypeUtils {
 
 	@Nullable
 	public ArgType replaceTypeVariablesUsingMap(ArgType replaceType, Map<ArgType, ArgType> replaceMap) {
+		if (replaceMap.isEmpty()) {
+			return null;
+		}
 		if (replaceType.isGenericType()) {
 			return replaceMap.get(replaceType);
+		}
+		if (replaceType.isArray()) {
+			ArgType replaced = replaceTypeVariablesUsingMap(replaceType.getArrayElement(), replaceMap);
+			if (replaced == null) {
+				return null;
+			}
+			return ArgType.array(replaced);
 		}
 
 		ArgType wildcardType = replaceType.getWildcardType();

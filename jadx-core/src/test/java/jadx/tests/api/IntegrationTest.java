@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.jar.JarOutputStream;
 
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -103,6 +104,8 @@ public abstract class IntegrationTest extends TestUtils {
 		DebugChecks.checksEnabled = true;
 	}
 
+	private JadxDecompiler jadxDecompiler;
+
 	@BeforeEach
 	public void init() {
 		this.deleteTmpFiles = true;
@@ -123,6 +126,9 @@ public abstract class IntegrationTest extends TestUtils {
 	@AfterEach
 	public void after() {
 		FileUtils.clearTempRootDir();
+		if (jadxDecompiler != null) {
+			jadxDecompiler.close();
+		}
 	}
 
 	public String getTestName() {
@@ -145,14 +151,14 @@ public abstract class IntegrationTest extends TestUtils {
 	}
 
 	public ClassNode getClassNodeFromFile(File file, String clsName) {
-		JadxDecompiler d = loadFiles(Collections.singletonList(file));
-		RootNode root = JadxInternalAccess.getRoot(d);
+		jadxDecompiler = loadFiles(Collections.singletonList(file));
+		RootNode root = JadxInternalAccess.getRoot(jadxDecompiler);
 
-		ClassNode cls = root.searchClassByName(clsName);
+		ClassNode cls = root.resolveClass(clsName);
 		assertThat("Class not found: " + clsName, cls, notNullValue());
 		assertThat(clsName, is(cls.getClassInfo().getFullName()));
 
-		decompileAndCheck(d, Collections.singletonList(cls));
+		decompileAndCheck(jadxDecompiler, Collections.singletonList(cls));
 		return cls;
 	}
 
@@ -168,12 +174,13 @@ public abstract class IntegrationTest extends TestUtils {
 
 	protected JadxDecompiler loadFiles(List<File> inputFiles) {
 		JadxDecompiler d;
+		args.setInputFiles(inputFiles);
+		d = new JadxDecompiler(args);
 		try {
-			args.setInputFiles(inputFiles);
-			d = new JadxDecompiler(args);
 			d.load();
 		} catch (Exception e) {
 			e.printStackTrace();
+			d.close();
 			fail(e.getMessage());
 			return null;
 		}
@@ -458,6 +465,13 @@ public abstract class IntegrationTest extends TestUtils {
 		return files;
 	}
 
+	@NotNull
+	protected static String removeLineComments(ClassNode cls) {
+		String code = cls.getCode().getCodeStr().replaceAll("\\W*//.*", "");
+		System.out.println(code);
+		return code;
+	}
+
 	public JadxArgs getArgs() {
 		return args;
 	}
@@ -479,6 +493,7 @@ public abstract class IntegrationTest extends TestUtils {
 	}
 
 	protected void setFallback() {
+		disableCompilation();
 		this.args.setFallbackMode(true);
 	}
 

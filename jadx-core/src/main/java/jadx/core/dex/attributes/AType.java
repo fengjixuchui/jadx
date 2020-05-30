@@ -20,13 +20,13 @@ import jadx.core.dex.attributes.nodes.LocalVarsDebugInfoAttr;
 import jadx.core.dex.attributes.nodes.LoopInfo;
 import jadx.core.dex.attributes.nodes.LoopLabelAttr;
 import jadx.core.dex.attributes.nodes.MethodInlineAttr;
+import jadx.core.dex.attributes.nodes.MethodOverrideAttr;
 import jadx.core.dex.attributes.nodes.PhiListAttr;
 import jadx.core.dex.attributes.nodes.RegDebugInfoAttr;
 import jadx.core.dex.attributes.nodes.RenameReasonAttr;
 import jadx.core.dex.attributes.nodes.SkipMethodArgsAttr;
 import jadx.core.dex.attributes.nodes.SourceFileAttr;
 import jadx.core.dex.nodes.IMethodDetails;
-import jadx.core.dex.nodes.parser.FieldInitAttr;
 import jadx.core.dex.trycatch.CatchAttr;
 import jadx.core.dex.trycatch.ExcHandlerAttr;
 import jadx.core.dex.trycatch.SplitterBlockAttr;
@@ -63,6 +63,7 @@ public class AType<T extends IAttribute> {
 	public static final AType<MethodInlineAttr> METHOD_INLINE = new AType<>();
 	public static final AType<MethodParameters> ANNOTATION_MTH_PARAMETERS = new AType<>();
 	public static final AType<SkipMethodArgsAttr> SKIP_MTH_ARGS = new AType<>();
+	public static final AType<MethodOverrideAttr> METHOD_OVERRIDE = new AType<>();
 
 	// region
 	public static final AType<DeclareVariablesAttr> DECLARE_VARIABLES = new AType<>();
