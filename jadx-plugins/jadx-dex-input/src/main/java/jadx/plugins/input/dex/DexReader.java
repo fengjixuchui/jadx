@@ -1,11 +1,6 @@
 package jadx.plugins.input.dex;
 
-import java.io.Closeable;
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.file.FileSystem;
-import java.nio.file.Path;
 import java.util.function.Consumer;
 
 import jadx.api.plugins.input.data.IClassData;
@@ -14,37 +9,17 @@ import jadx.plugins.input.dex.sections.DexHeader;
 import jadx.plugins.input.dex.sections.SectionReader;
 import jadx.plugins.input.dex.sections.annotations.AnnotationsParser;
 
-public class DexReader implements Closeable {
-
-	private final Path path;
-	private final FileChannel fileChannel;
+public class DexReader {
+	private final int uniqId;
+	private final String inputFileName;
 	private final ByteBuffer buf;
 	private final DexHeader header;
 
-	public DexReader(Path path, FileChannel fileChannel) throws IOException {
-		this.path = path;
-		this.fileChannel = fileChannel;
-		this.buf = loadIntoByteBuffer(fileChannel);
+	public DexReader(int uniqId, String inputFileName, byte[] content) {
+		this.uniqId = uniqId;
+		this.inputFileName = inputFileName;
+		this.buf = ByteBuffer.wrap(content);
 		this.header = new DexHeader(new SectionReader(this, 0));
-	}
-
-	private static ByteBuffer loadIntoByteBuffer(FileChannel fileChannel) throws IOException {
-		long size = fileChannel.size();
-		if (size > Integer.MAX_VALUE) {
-			throw new IOException("File too big");
-		}
-		int readSize = (int) size;
-		ByteBuffer buf = ByteBuffer.allocate(readSize);
-		fileChannel.position(0);
-		int read = fileChannel.read(buf);
-		if (read != readSize) {
-			throw new IOException("Failed to read whole file into buffer. Read: " + read + ", expected: " + readSize);
-		}
-		return buf;
-	}
-
-	public String getDexVersion() {
-		return this.header.getVersion();
 	}
 
 	public void visitClasses(Consumer<IClassData> consumer) {
@@ -70,27 +45,16 @@ public class DexReader implements Closeable {
 		return header;
 	}
 
-	public Path getPath() {
-		return path;
+	public String getInputFileName() {
+		return inputFileName;
 	}
 
-	public String getFullPath() {
-		StringBuilder sb = new StringBuilder();
-		FileSystem fileSystem = path.getFileSystem();
-		if (fileSystem.getClass().getName().contains("Zip")) {
-			sb.append(fileSystem.toString()).append(':');
-		}
-		sb.append(path.toAbsolutePath());
-		return sb.toString();
-	}
-
-	@Override
-	public void close() throws IOException {
-		this.fileChannel.close();
+	public int getUniqId() {
+		return uniqId;
 	}
 
 	@Override
 	public String toString() {
-		return getFullPath();
+		return inputFileName;
 	}
 }

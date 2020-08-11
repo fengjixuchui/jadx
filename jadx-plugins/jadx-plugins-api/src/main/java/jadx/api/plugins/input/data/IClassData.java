@@ -1,6 +1,5 @@
 package jadx.api.plugins.input.data;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -10,6 +9,7 @@ import jadx.api.plugins.input.data.annotations.EncodedValue;
 import jadx.api.plugins.input.data.annotations.IAnnotation;
 
 public interface IClassData {
+	IClassData copy();
 
 	String getType();
 
@@ -22,7 +22,7 @@ public interface IClassData {
 
 	String getSourceFile();
 
-	Path getInputPath();
+	String getInputFileName();
 
 	void visitFieldsAndMethods(Consumer<IFieldData> fieldsConsumer, Consumer<IMethodData> mthConsumer);
 
@@ -30,6 +30,5 @@ public interface IClassData {
 
 	List<IAnnotation> getAnnotations();
 
-	// TODO: make api methods to get dissembled code
-	int getClassDefOffset();
+	String getDisassembledCode();
 }

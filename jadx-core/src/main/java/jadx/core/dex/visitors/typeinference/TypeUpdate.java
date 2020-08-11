@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -22,6 +24,7 @@ import jadx.core.dex.instructions.args.RegisterArg;
 import jadx.core.dex.instructions.args.SSAVar;
 import jadx.core.dex.nodes.IMethodDetails;
 import jadx.core.dex.nodes.InsnNode;
+import jadx.core.dex.nodes.MethodNode;
 import jadx.core.dex.nodes.RootNode;
 import jadx.core.dex.nodes.utils.TypeUtils;
 import jadx.core.utils.exceptions.JadxOverflowException;
@@ -47,30 +50,30 @@ public final class TypeUpdate {
 	/**
 	 * Perform recursive type checking and type propagation for all related variables
 	 */
-	public TypeUpdateResult apply(SSAVar ssaVar, ArgType candidateType) {
-		return apply(ssaVar, candidateType, TypeUpdateFlags.FLAGS_EMPTY);
+	public TypeUpdateResult apply(MethodNode mth, SSAVar ssaVar, ArgType candidateType) {
+		return apply(mth, ssaVar, candidateType, TypeUpdateFlags.FLAGS_EMPTY);
 	}
 
 	/**
 	 * Allow wider types for apply from debug info and some special cases
 	 */
-	public TypeUpdateResult applyWithWiderAllow(SSAVar ssaVar, ArgType candidateType) {
-		return apply(ssaVar, candidateType, TypeUpdateFlags.FLAGS_WIDER);
+	public TypeUpdateResult applyWithWiderAllow(MethodNode mth, SSAVar ssaVar, ArgType candidateType) {
+		return apply(mth, ssaVar, candidateType, TypeUpdateFlags.FLAGS_WIDER);
 	}
 
 	/**
 	 * Force type setting
 	 */
-	public TypeUpdateResult applyWithWiderIgnSame(SSAVar ssaVar, ArgType candidateType) {
-		return apply(ssaVar, candidateType, TypeUpdateFlags.FLAGS_WIDER_IGNSAME);
+	public TypeUpdateResult applyWithWiderIgnSame(MethodNode mth, SSAVar ssaVar, ArgType candidateType) {
+		return apply(mth, ssaVar, candidateType, TypeUpdateFlags.FLAGS_WIDER_IGNSAME);
 	}
 
-	private TypeUpdateResult apply(SSAVar ssaVar, ArgType candidateType, TypeUpdateFlags flags) {
+	private TypeUpdateResult apply(MethodNode mth, SSAVar ssaVar, ArgType candidateType, TypeUpdateFlags flags) {
 		if (candidateType == null || !candidateType.isTypeKnown()) {
 			return REJECT;
 		}
 
-		TypeUpdateInfo updateInfo = new TypeUpdateInfo(flags);
+		TypeUpdateInfo updateInfo = new TypeUpdateInfo(mth, flags);
 		TypeUpdateResult result = updateTypeChecked(updateInfo, ssaVar.getAssign(), candidateType);
 		if (result == REJECT) {
 			return result;
@@ -79,10 +82,9 @@ public final class TypeUpdate {
 		if (updates.isEmpty()) {
 			return SAME;
 		}
-		if (Consts.DEBUG) {
+		if (Consts.DEBUG_TYPE_INFERENCE) {
 			LOG.debug("Applying types for {} -> {}", ssaVar, candidateType);
-			updates.forEach(updateEntry -> LOG.debug("  {} -> {}, insn: {}",
-					updateEntry.getType(), updateEntry.getArg(), updateEntry.getArg().getParentInsn()));
+			updates.forEach(updateEntry -> LOG.debug("  {} -> {}", updateEntry.getType(), updateEntry.getArg()));
 		}
 		updateInfo.applyUpdates();
 		return CHANGED;
@@ -93,25 +95,35 @@ public final class TypeUpdate {
 			throw new JadxRuntimeException("Null type update for arg: " + arg);
 		}
 		ArgType currentType = arg.getType();
-		if (Objects.equals(currentType, candidateType) && !updateInfo.getFlags().isIgnoreSame()) {
-			return SAME;
-		}
-		TypeCompareEnum compareResult = comparator.compareTypes(candidateType, currentType);
-		if (arg.isTypeImmutable() && currentType != ArgType.UNKNOWN) {
-			// don't changed type
-			if (compareResult == TypeCompareEnum.EQUAL) {
+		if (Objects.equals(currentType, candidateType)) {
+			if (!updateInfo.getFlags().isIgnoreSame()) {
 				return SAME;
 			}
-			if (Consts.DEBUG) {
-				LOG.debug("Type rejected for {} due to conflict: candidate={}, current={}", arg, candidateType, currentType);
+		} else {
+			if (candidateType.isWildcard()) {
+				if (Consts.DEBUG_TYPE_INFERENCE) {
+					LOG.debug("Wildcard type rejected for {}: candidate={}, current={}", arg, candidateType, currentType);
+				}
+				return REJECT;
 			}
-			return REJECT;
-		}
-		if (compareResult.isWider() && !updateInfo.getFlags().isAllowWider()) {
-			if (Consts.DEBUG) {
-				LOG.debug("Type rejected for {}: candidate={} is wider than current={}", arg, candidateType, currentType);
+
+			TypeCompareEnum compareResult = comparator.compareTypes(candidateType, currentType);
+			if (arg.isTypeImmutable() && currentType != ArgType.UNKNOWN) {
+				// don't changed type
+				if (compareResult == TypeCompareEnum.EQUAL) {
+					return SAME;
+				}
+				if (Consts.DEBUG_TYPE_INFERENCE) {
+					LOG.debug("Type rejected for {} due to conflict: candidate={}, current={}", arg, candidateType, currentType);
+				}
+				return REJECT;
 			}
-			return REJECT;
+			if (compareResult.isWider() && !updateInfo.getFlags().isAllowWider()) {
+				if (Consts.DEBUG_TYPE_INFERENCE) {
+					LOG.debug("Type rejected for {}: candidate={} is wider than current={}", arg, candidateType, currentType);
+				}
+				return REJECT;
+			}
 		}
 		if (arg instanceof RegisterArg) {
 			RegisterArg reg = (RegisterArg) arg;
@@ -124,15 +136,12 @@ public final class TypeUpdate {
 		TypeInfo typeInfo = ssaVar.getTypeInfo();
 		ArgType immutableType = ssaVar.getImmutableType();
 		if (immutableType != null && !Objects.equals(immutableType, candidateType)) {
-			if (Consts.DEBUG) {
+			if (Consts.DEBUG_TYPE_INFERENCE) {
 				LOG.info("Reject change immutable type {} to {} for {}", immutableType, candidateType, ssaVar);
 			}
 			return REJECT;
 		}
-		if (!inBounds(updateInfo, typeInfo.getBounds(), candidateType)) {
-			if (Consts.DEBUG) {
-				LOG.debug("Reject type '{}' for {} by bounds: {}", candidateType, ssaVar, typeInfo.getBounds());
-			}
+		if (!inBounds(updateInfo, ssaVar, typeInfo.getBounds(), candidateType)) {
 			return REJECT;
 		}
 		return requestUpdateForSsaVar(updateInfo, ssaVar, candidateType);
@@ -163,12 +172,7 @@ public final class TypeUpdate {
 			return CHANGED;
 		}
 		updateInfo.requestUpdate(arg, candidateType);
-		if (updateInfo.getUpdates().size() > 500) {
-			if (Consts.DEBUG) {
-				LOG.error("Type update error: too deep update tree");
-			}
-			return REJECT;
-		}
+		updateInfo.checkUpdatesCount();
 		try {
 			TypeUpdateResult result = runListeners(updateInfo, arg, candidateType);
 			if (result == REJECT) {
@@ -193,10 +197,16 @@ public final class TypeUpdate {
 	}
 
 	boolean inBounds(Set<ITypeBound> bounds, ArgType candidateType) {
-		return inBounds(null, bounds, candidateType);
+		for (ITypeBound bound : bounds) {
+			ArgType boundType = bound.getType();
+			if (boundType != null && !checkBound(candidateType, bound, boundType)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
-	private boolean inBounds(@Nullable TypeUpdateInfo updateInfo, Set<ITypeBound> bounds, ArgType candidateType) {
+	private boolean inBounds(TypeUpdateInfo updateInfo, SSAVar ssaVar, Set<ITypeBound> bounds, ArgType candidateType) {
 		for (ITypeBound bound : bounds) {
 			ArgType boundType;
 			if (updateInfo != null && bound instanceof ITypeBoundDynamic) {
@@ -205,6 +215,9 @@ public final class TypeUpdate {
 				boundType = bound.getType();
 			}
 			if (boundType != null && !checkBound(candidateType, bound, boundType)) {
+				if (Consts.DEBUG_TYPE_INFERENCE) {
+					LOG.debug("Reject type '{}' for {} by bound: {}", candidateType, ssaVar, bound);
+				}
 				return false;
 			}
 		}
@@ -237,6 +250,7 @@ public final class TypeUpdate {
 
 			case UNKNOWN:
 				LOG.warn("Can't compare types, unknown hierarchy: {} and {}", candidateType, boundType);
+				comparator.compareTypes(candidateType, boundType);
 				return true;
 
 			default:
@@ -287,53 +301,90 @@ public final class TypeUpdate {
 			// TODO: implement backward type propagation (from result to instance)
 			return SAME;
 		}
-		if (invoke.getInstanceArg() == arg && candidateType.containsGeneric()) {
-			// resolve result and arg types from generic instance type
+		if (invoke.getInstanceArg() == arg) {
 			IMethodDetails methodDetails = root.getMethodUtils().getMethodDetails(invoke);
 			if (methodDetails == null) {
 				return SAME;
 			}
 			TypeUtils typeUtils = root.getTypeUtils();
+			Set<ArgType> knownTypeVars = typeUtils.getKnownTypeVarsAtMethod(updateInfo.getMth());
 			Map<ArgType, ArgType> typeVarsMap = typeUtils.getTypeVariablesMapping(candidateType);
-			if (typeVarsMap.isEmpty()) {
-				return SAME;
-			}
 
-			boolean allSame = true;
-			if (invoke.getResult() != null) {
-				ArgType returnType = typeUtils.replaceTypeVariablesUsingMap(methodDetails.getReturnType(), typeVarsMap);
-				if (returnType != null) {
-					TypeUpdateResult result = updateTypeChecked(updateInfo, invoke.getResult(), returnType);
-					if (result == REJECT) {
-						return REJECT;
-					}
-					if (result == CHANGED) {
-						allSame = false;
-					}
-				}
-			}
-
-			int argOffset = invoke.getFirstArgOffset();
+			ArgType returnType = methodDetails.getReturnType();
 			List<ArgType> argTypes = methodDetails.getArgTypes();
 			int argsCount = argTypes.size();
-			for (int i = 0; i < argsCount; i++) {
-				ArgType genericArgType = argTypes.get(i);
-				ArgType resultArgType = typeUtils.replaceClassGenerics(candidateType, genericArgType);
-				if (resultArgType != null) {
-					InsnArg invokeArg = invoke.getArg(argOffset + i);
-					TypeUpdateResult result = updateTypeChecked(updateInfo, invokeArg, resultArgType);
-					if (result == REJECT) {
-						return REJECT;
-					}
-					if (result == CHANGED) {
-						allSame = false;
-					}
-				}
+			if (typeVarsMap.isEmpty()) {
+				// generics can't be resolved => use as is
+				return applyInvokeTypes(updateInfo, invoke, argsCount, knownTypeVars, () -> returnType, argTypes::get);
 			}
-			return allSame ? SAME : CHANGED;
+			// resolve types before apply
+			return applyInvokeTypes(updateInfo, invoke, argsCount, knownTypeVars,
+					() -> typeUtils.replaceTypeVariablesUsingMap(returnType, typeVarsMap),
+					argNum -> typeUtils.replaceClassGenerics(candidateType, argTypes.get(argNum)));
 		}
 		return SAME;
 
+	}
+
+	private TypeUpdateResult applyInvokeTypes(TypeUpdateInfo updateInfo, BaseInvokeNode invoke, int argsCount,
+			Set<ArgType> knownTypeVars, Supplier<ArgType> getReturnType, Function<Integer, ArgType> getArgType) {
+		boolean allSame = true;
+		RegisterArg resultArg = invoke.getResult();
+		if (resultArg != null && !resultArg.isTypeImmutable()) {
+			ArgType returnType = checkType(knownTypeVars, getReturnType.get());
+			if (returnType != null) {
+				TypeUpdateResult result = updateTypeChecked(updateInfo, resultArg, returnType);
+				if (result == REJECT) {
+					TypeCompareEnum compare = comparator.compareTypes(returnType, resultArg.getType());
+					if (compare.isWider()) {
+						return REJECT;
+					}
+				}
+				if (result == CHANGED) {
+					allSame = false;
+				}
+			}
+		}
+		int argOffset = invoke.getFirstArgOffset();
+		for (int i = 0; i < argsCount; i++) {
+			InsnArg invokeArg = invoke.getArg(argOffset + i);
+			if (!invokeArg.isTypeImmutable()) {
+				ArgType argType = checkType(knownTypeVars, getArgType.apply(i));
+				if (argType != null) {
+					TypeUpdateResult result = updateTypeChecked(updateInfo, invokeArg, argType);
+					if (result == REJECT) {
+						TypeCompareEnum compare = comparator.compareTypes(argType, invokeArg.getType());
+						if (compare.isNarrow()) {
+							return REJECT;
+						}
+					}
+					if (result == CHANGED) {
+						allSame = false;
+					}
+				}
+			}
+		}
+		return allSame ? SAME : CHANGED;
+	}
+
+	@Nullable
+	private ArgType checkType(Set<ArgType> knownTypeVars, @Nullable ArgType type) {
+		if (type == null) {
+			return null;
+		}
+		if (type.isWildcard()) {
+			return null;
+		}
+		if (type.containsTypeVariable()) {
+			if (knownTypeVars.isEmpty()) {
+				return null;
+			}
+			Boolean hasUnknown = type.visitTypes(t -> t.isGenericType() && !knownTypeVars.contains(t) ? Boolean.TRUE : null);
+			if (hasUnknown != null) {
+				return null;
+			}
+		}
+		return type;
 	}
 
 	private TypeUpdateResult sameFirstArgListener(TypeUpdateInfo updateInfo, InsnNode insn, InsnArg arg, ArgType candidateType) {
@@ -356,7 +407,7 @@ public final class TypeUpdate {
 
 		TypeUpdateResult result = updateTypeChecked(updateInfo, changeArg, candidateType);
 		if (result == SAME && !correctType) {
-			if (Consts.DEBUG) {
+			if (Consts.DEBUG_TYPE_INFERENCE) {
 				LOG.debug("Move insn types mismatch: {} -> {}, change arg: {}, insn: {}",
 						candidateType, changeArg.getType(), changeArg, insn);
 			}

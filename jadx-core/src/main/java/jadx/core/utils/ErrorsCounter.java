@@ -1,6 +1,5 @@
 package jadx.core.utils;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -37,12 +36,7 @@ public class ErrorsCounter {
 	}
 
 	public static String formatMsg(IDexNode node, String msg) {
-		return msg + " in " + node.typeName() + ": " + node + ", file: " + getNodeFile(node);
-	}
-
-	private static String getNodeFile(IDexNode node) {
-		Path inputPath = node.getInputPath();
-		return inputPath == null ? "synthetic" : inputPath.toString();
+		return msg + " in " + node.typeName() + ": " + node + ", file: " + node.getInputFileName();
 	}
 
 	private synchronized <N extends IDexNode & IAttributeNode> String addError(N node, String error, @Nullable Throwable e) {
@@ -51,13 +45,12 @@ public class ErrorsCounter {
 
 		String msg = formatMsg(node, error);
 		if (PRINT_MTH_SIZE && node instanceof MethodNode) {
-			long insnsCount = ((MethodNode) node).countInsns();
-			msg = "[" + insnsCount + "] " + msg;
+			msg = "[" + ((MethodNode) node).getInsnsCount() + "] " + msg;
 		}
 		if (e == null) {
 			LOG.error(msg);
 		} else if (e instanceof StackOverflowError) {
-			LOG.error(msg);
+			LOG.error("{}, error: StackOverflowError", msg);
 		} else if (e instanceof JadxOverflowException) {
 			// don't print full stack trace
 			String details = e.getMessage();

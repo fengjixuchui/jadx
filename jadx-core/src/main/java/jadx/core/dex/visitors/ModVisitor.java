@@ -139,7 +139,7 @@ public class ModVisitor extends AbstractVisitor {
 						break;
 
 					case CHECK_CAST:
-						removeRedundantCast(mth, block, i, (IndexInsnNode) insn);
+						removeCheckCast(mth, block, i, (IndexInsnNode) insn);
 						break;
 
 					case CAST:
@@ -201,21 +201,25 @@ public class ModVisitor extends AbstractVisitor {
 		if (castArg.getType() == ArgType.BOOLEAN) {
 			ArgType type = insn.getResult().getType();
 			if (type.isPrimitive()) {
-				InsnArg zero = new LiteralArg(0, type);
-				long litVal = 1;
-				if (type == ArgType.DOUBLE) {
-					litVal = DOUBLE_TO_BITS;
-				} else if (type == ArgType.FLOAT) {
-					litVal = FLOAT_TO_BITS;
-				}
-				InsnArg one = new LiteralArg(litVal, type);
-
-				IfNode ifNode = new IfNode(IfOp.EQ, -1, castArg, LiteralArg.TRUE);
-				IfCondition condition = IfCondition.fromIfNode(ifNode);
-				TernaryInsn ternary = new TernaryInsn(condition, insn.getResult(), one, zero);
+				TernaryInsn ternary = makeBooleanConvertInsn(insn.getResult(), castArg, type);
 				replaceInsn(mth, block, i, ternary);
 			}
 		}
+	}
+
+	public static TernaryInsn makeBooleanConvertInsn(RegisterArg result, InsnArg castArg, ArgType type) {
+		InsnArg zero = new LiteralArg(0, type);
+		long litVal = 1;
+		if (type == ArgType.DOUBLE) {
+			litVal = DOUBLE_TO_BITS;
+		} else if (type == ArgType.FLOAT) {
+			litVal = FLOAT_TO_BITS;
+		}
+		InsnArg one = new LiteralArg(litVal, type);
+
+		IfNode ifNode = new IfNode(IfOp.EQ, -1, castArg, LiteralArg.TRUE);
+		IfCondition condition = IfCondition.fromIfNode(ifNode);
+		return new TernaryInsn(condition, result, one, zero);
 	}
 
 	private void replaceConstInAnnotations(ClassNode cls) {
@@ -300,15 +304,18 @@ public class ModVisitor extends AbstractVisitor {
 		return false;
 	}
 
-	private static void removeRedundantCast(MethodNode mth, BlockNode block, int i, IndexInsnNode insn) {
+	private static void removeCheckCast(MethodNode mth, BlockNode block, int i, IndexInsnNode insn) {
 		InsnArg castArg = insn.getArg(0);
 		ArgType castType = (ArgType) insn.getIndex();
 		if (!ArgType.isCastNeeded(mth.root(), castArg.getType(), castType)
 				|| isCastDuplicate(insn)) {
-			InsnNode insnNode = new InsnNode(InsnType.MOVE, 1);
-			insnNode.setResult(insn.getResult());
-			insnNode.addArg(castArg);
-			replaceInsn(mth, block, i, insnNode);
+			RegisterArg result = insn.getResult();
+			result.setType(castArg.getType());
+
+			InsnNode move = new InsnNode(InsnType.MOVE, 1);
+			move.setResult(result);
+			move.addArg(castArg);
+			replaceInsn(mth, block, i, move);
 		}
 	}
 

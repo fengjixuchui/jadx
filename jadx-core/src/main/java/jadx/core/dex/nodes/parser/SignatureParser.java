@@ -14,13 +14,12 @@ import jadx.api.plugins.input.data.annotations.IAnnotation;
 import jadx.core.Consts;
 import jadx.core.dex.attributes.IAttributeNode;
 import jadx.core.dex.instructions.args.ArgType;
-import jadx.core.dex.nodes.GenericTypeParameter;
 import jadx.core.utils.Utils;
 import jadx.core.utils.exceptions.JadxRuntimeException;
 
 public class SignatureParser {
-
 	private static final Logger LOG = LoggerFactory.getLogger(SignatureParser.class);
+
 	private static final char STOP_CHAR = 0;
 
 	private final String sign;
@@ -173,10 +172,14 @@ public class SignatureParser {
 		throw new JadxRuntimeException("Can't parse type: " + debugString() + ", unexpected: " + ch);
 	}
 
-	private ArgType consumeObjectType(boolean incompleteType) {
+	private ArgType consumeObjectType(boolean innerType) {
 		mark();
 		int ch;
 		do {
+			if (innerType && lookAhead('.')) {
+				// stop before next nested inner class
+				return ArgType.object(inclusiveSlice());
+			}
 			ch = next();
 			if (ch == STOP_CHAR) {
 				return null;
@@ -185,39 +188,47 @@ public class SignatureParser {
 
 		if (ch == ';') {
 			String obj;
-			if (incompleteType) {
+			if (innerType) {
 				obj = slice().replace('/', '.');
 			} else {
 				obj = inclusiveSlice();
 			}
 			return ArgType.object(obj);
-		} else {
-			// generic type start ('<')
-			String obj = slice();
-			if (!incompleteType) {
-				obj += ';';
-			}
-			ArgType[] genArr = consumeGenericArgs();
-			consume('>');
+		}
+		// generic type start ('<')
+		String obj = slice();
+		if (!innerType) {
+			obj += ';';
+		}
+		List<ArgType> typeVars = consumeGenericArgs();
+		consume('>');
 
-			ArgType genericType = ArgType.generic(obj, genArr);
-			if (lookAhead('.')) {
-				consume('.');
-				next();
-				// type parsing not completed, proceed to inner class
-				ArgType inner = consumeObjectType(true);
-				if (inner == null) {
-					throw new JadxRuntimeException("No inner type found: " + debugString());
-				}
-				return ArgType.outerGeneric(genericType, inner);
-			} else {
-				consume(';');
-				return genericType;
+		ArgType genericType = ArgType.generic(obj, typeVars);
+		if (!lookAhead('.')) {
+			consume(';');
+			return genericType;
+		}
+		consume('.');
+		next();
+		// type parsing not completed, proceed to inner class
+		ArgType inner = consumeObjectType(true);
+		if (inner == null) {
+			throw new JadxRuntimeException("No inner type found: " + debugString());
+		}
+		// for every nested inner type create nested type object
+		while (lookAhead('.')) {
+			genericType = ArgType.outerGeneric(genericType, inner);
+			consume('.');
+			next();
+			inner = consumeObjectType(true);
+			if (inner == null) {
+				throw new JadxRuntimeException("Unexpected inner type found: " + debugString());
 			}
 		}
+		return ArgType.outerGeneric(genericType, inner);
 	}
 
-	private ArgType[] consumeGenericArgs() {
+	private List<ArgType> consumeGenericArgs() {
 		List<ArgType> list = new LinkedList<>();
 		ArgType type;
 		do {
@@ -237,7 +248,7 @@ public class SignatureParser {
 				list.add(type);
 			}
 		} while (type != null && !lookAhead('>'));
-		return list.toArray(new ArgType[0]);
+		return list;
 	}
 
 	/**
@@ -245,11 +256,11 @@ public class SignatureParser {
 	 * <p/>
 	 * Example: "<T:Ljava/lang/Exception;:Ljava/lang/Object;>"
 	 */
-	public List<GenericTypeParameter> consumeGenericTypeParameters() {
+	public List<ArgType> consumeGenericTypeParameters() {
 		if (!lookAhead('<')) {
 			return Collections.emptyList();
 		}
-		List<GenericTypeParameter> list = new ArrayList<>();
+		List<ArgType> list = new ArrayList<>();
 		consume('<');
 		while (true) {
 			if (lookAhead('>') || next() == STOP_CHAR) {
@@ -263,7 +274,7 @@ public class SignatureParser {
 			consume(':');
 			tryConsume(':');
 			List<ArgType> types = consumeExtendsTypesList();
-			list.add(new GenericTypeParameter(ArgType.genericType(id), types));
+			list.add(ArgType.genericType(id, types));
 		}
 		consume('>');
 		return list;

@@ -1,7 +1,5 @@
 package jadx.core.dex.nodes;
 
-import java.io.StringWriter;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -10,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.jetbrains.annotations.NotNull;
@@ -37,27 +36,27 @@ import jadx.core.dex.info.MethodInfo;
 import jadx.core.dex.instructions.args.ArgType;
 import jadx.core.dex.instructions.args.LiteralArg;
 import jadx.core.dex.nodes.parser.SignatureParser;
-import jadx.core.utils.SmaliUtils;
+import jadx.core.dex.visitors.ProcessAnonymous;
 import jadx.core.utils.Utils;
 import jadx.core.utils.exceptions.JadxRuntimeException;
 
 import static jadx.core.dex.nodes.ProcessState.LOADED;
+import static jadx.core.dex.nodes.ProcessState.NOT_LOADED;
 
 public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeNode, Comparable<ClassNode> {
 	private static final Logger LOG = LoggerFactory.getLogger(ClassNode.class);
 
 	private final RootNode root;
-	private final int clsDefOffset;
-	private final Path inputPath;
+	private final IClassData clsData;
 
 	private final ClassInfo clsInfo;
 	private AccessInfo accessFlags;
 	private ArgType superClass;
 	private List<ArgType> interfaces;
-	private List<GenericTypeParameter> generics = Collections.emptyList();
+	private List<ArgType> generics = Collections.emptyList();
 
-	private final List<MethodNode> methods;
-	private final List<FieldNode> fields;
+	private List<MethodNode> methods;
+	private List<FieldNode> fields;
 	private List<ClassNode> innerClasses = Collections.emptyList();
 
 	private List<ClassNode> inlinedClasses = Collections.emptyList();
@@ -81,9 +80,12 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 
 	public ClassNode(RootNode root, IClassData cls) {
 		this.root = root;
-		this.inputPath = cls.getInputPath();
-		this.clsDefOffset = cls.getClassDefOffset();
 		this.clsInfo = ClassInfo.fromType(root, ArgType.object(cls.getType()));
+		this.clsData = cls.copy();
+		initialLoad(clsData);
+	}
+
+	private void initialLoad(IClassData cls) {
 		try {
 			String superType = cls.getSuperType();
 			if (superType == null) {
@@ -131,11 +133,18 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 		this.accessFlags = new AccessInfo(accFlagsValue, AFType.CLASS);
 	}
 
-	// empty synthetic class
-	public ClassNode(RootNode root, String name, int accessFlags) {
+	public static ClassNode addSyntheticClass(RootNode root, String name, int accessFlags) {
+		ClassNode cls = new ClassNode(root, name, accessFlags);
+		cls.add(AFlag.SYNTHETIC);
+		cls.setState(ProcessState.PROCESS_COMPLETE);
+		root.addClassNode(cls);
+		return cls;
+	}
+
+	// Create empty class
+	private ClassNode(RootNode root, String name, int accessFlags) {
 		this.root = root;
-		this.inputPath = null;
-		this.clsDefOffset = 0;
+		this.clsData = null;
 		this.clsInfo = ClassInfo.fromName(root, name);
 		this.interfaces = new ArrayList<>();
 		this.methods = new ArrayList<>();
@@ -214,7 +223,7 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 				if (sp != null) {
 					ArgType gType = sp.consumeType();
 					if (gType != null) {
-						field.setType(gType);
+						field.setType(root.getTypeUtils().expandTypeVariables(this, gType));
 					}
 				}
 			} catch (Exception e) {
@@ -269,8 +278,29 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 		return decompile(true);
 	}
 
-	public ICodeInfo reloadCode() {
+	public synchronized ICodeInfo reRunDecompile() {
 		return decompile(false);
+	}
+
+	public synchronized ICodeInfo reloadCode() {
+		unload();
+		deepUnload();
+		return decompile(false);
+	}
+
+	public void deepUnload() {
+		if (clsData == null) {
+			// manually added class
+			return;
+		}
+		clearAttributes();
+		root().getConstValues().removeForClass(this);
+		initialLoad(clsData);
+		ProcessAnonymous.runForClass(this);
+
+		for (ClassNode innerClass : innerClasses) {
+			innerClass.deepUnload();
+		}
 	}
 
 	private synchronized ICodeInfo decompile(boolean searchInCache) {
@@ -305,10 +335,15 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 
 	@Override
 	public void unload() {
+		if (state == NOT_LOADED) {
+			return;
+		}
 		methods.forEach(MethodNode::unload);
 		innerClasses.forEach(ClassNode::unload);
 		fields.forEach(FieldNode::unloadAttributes);
 		unloadAttributes();
+		setState(NOT_LOADED);
+		this.smali = null;
 	}
 
 	private void buildCache() {
@@ -327,8 +362,16 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 		return interfaces;
 	}
 
-	public List<GenericTypeParameter> getGenericTypeParameters() {
+	public List<ArgType> getGenericTypeParameters() {
 		return generics;
+	}
+
+	public ArgType getType() {
+		ArgType clsType = clsInfo.getType();
+		if (Utils.notEmpty(generics)) {
+			return ArgType.generic(clsType, generics);
+		}
+		return clsType;
 	}
 
 	public List<MethodNode> getMethods() {
@@ -423,6 +466,16 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 	public ClassNode getTopParentClass() {
 		ClassNode parent = getParentClass();
 		return parent == this ? this : parent.getTopParentClass();
+	}
+
+	public void visitParentClasses(Consumer<ClassNode> consumer) {
+		ClassNode currentCls = this;
+		ClassNode parentCls = currentCls.getParentClass();
+		while (parentCls != currentCls) {
+			consumer.accept(parentCls);
+			currentCls = parentCls;
+			parentCls = currentCls.getParentClass();
+		}
 	}
 
 	public boolean hasNotGeneratedParent() {
@@ -547,29 +600,28 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 
 	public String getSmali() {
 		if (smali == null) {
-			StringWriter stringWriter = new StringWriter(4096);
-			getSmali(this, stringWriter);
-			stringWriter.append(System.lineSeparator());
+			StringBuilder sb = new StringBuilder();
+			getSmali(sb);
+			sb.append(System.lineSeparator());
 			Set<ClassNode> allInlinedClasses = new LinkedHashSet<>();
 			getInnerAndInlinedClassesRecursive(allInlinedClasses);
 			for (ClassNode innerClass : allInlinedClasses) {
-				getSmali(innerClass, stringWriter);
-				stringWriter.append(System.lineSeparator());
+				innerClass.getSmali(sb);
+				sb.append(System.lineSeparator());
 			}
-			smali = stringWriter.toString();
+			smali = sb.toString();
 		}
 		return smali;
 	}
 
-	protected static boolean getSmali(ClassNode classNode, StringWriter stringWriter) {
-		Path inputPath = classNode.inputPath;
-		if (inputPath == null) {
-			stringWriter.append(String.format("###### Class %s is created by jadx", classNode.getFullName()));
-			return false;
+	protected void getSmali(StringBuilder sb) {
+		if (this.clsData == null) {
+			sb.append(String.format("###### Class %s is created by jadx", getFullName()));
+			return;
 		}
-		stringWriter.append(String.format("###### Class %s (%s)", classNode.getFullName(), classNode.getRawName()));
-		stringWriter.append(System.lineSeparator());
-		return SmaliUtils.getSmaliCode(inputPath, classNode.clsDefOffset, stringWriter);
+		sb.append(String.format("###### Class %s (%s)", getFullName(), getRawName()));
+		sb.append(System.lineSeparator());
+		sb.append(this.clsData.getDisassembledCode());
 	}
 
 	public ProcessState getState() {
@@ -605,8 +657,8 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 	}
 
 	@Override
-	public Path getInputPath() {
-		return inputPath;
+	public String getInputFileName() {
+		return clsData == null ? "synthetic" : clsData.getInputFileName();
 	}
 
 	@Override

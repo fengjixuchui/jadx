@@ -90,6 +90,7 @@ public class RootNode {
 		// sort classes by name, expect top classes before inner
 		classes.sort(Comparator.comparing(ClassNode::getFullName));
 		initInnerClasses();
+		LOG.debug("Classes loaded: {}", classes.size());
 	}
 
 	private void addDummyClass(IClassData classData, Exception exc) {
@@ -106,9 +107,8 @@ public class RootNode {
 		if (name == null || name.isEmpty()) {
 			name = "CLASS_" + typeStr;
 		}
-		ClassNode clsNode = new ClassNode(this, name, classData.getAccessFlags());
+		ClassNode clsNode = ClassNode.addSyntheticClass(this, name, classData.getAccessFlags());
 		ErrorsCounter.error(clsNode, "Load error", exc);
-		addClassNode(clsNode);
 	}
 
 	public void addClassNode(ClassNode clsNode) {
@@ -154,11 +154,10 @@ public class RootNode {
 				ClspGraph newClsp = new ClspGraph(this);
 				newClsp.load();
 				newClsp.addApp(classes);
-
 				this.clsp = newClsp;
 			}
 		} catch (Exception e) {
-			throw new JadxRuntimeException("Error loading classpath", e);
+			throw new JadxRuntimeException("Error loading jadx class set", e);
 		}
 	}
 
