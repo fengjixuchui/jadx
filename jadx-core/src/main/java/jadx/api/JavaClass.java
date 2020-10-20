@@ -57,11 +57,9 @@ public final class JavaClass implements JavaNode {
 		cls.decompile();
 	}
 
-	public synchronized void refresh() {
+	public synchronized void reload() {
 		listsLoaded = false;
-		cls.unload();
-		cls.deepUnload();
-		cls.reRunDecompile();
+		cls.reloadCode();
 	}
 
 	public synchronized String getSmali() {

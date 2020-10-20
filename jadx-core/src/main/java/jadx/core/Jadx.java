@@ -25,8 +25,9 @@ import jadx.core.dex.visitors.FixAccessModifiers;
 import jadx.core.dex.visitors.GenericTypesVisitor;
 import jadx.core.dex.visitors.IDexTreeVisitor;
 import jadx.core.dex.visitors.InitCodeVariables;
+import jadx.core.dex.visitors.InlineMethods;
 import jadx.core.dex.visitors.MarkFinallyVisitor;
-import jadx.core.dex.visitors.MethodInlineVisitor;
+import jadx.core.dex.visitors.MarkMethodsForInline;
 import jadx.core.dex.visitors.MethodInvokeVisitor;
 import jadx.core.dex.visitors.ModVisitor;
 import jadx.core.dex.visitors.MoveInlineVisitor;
@@ -37,6 +38,7 @@ import jadx.core.dex.visitors.ProcessInstructionsVisitor;
 import jadx.core.dex.visitors.ReSugarCode;
 import jadx.core.dex.visitors.RenameVisitor;
 import jadx.core.dex.visitors.ShadowFieldVisitor;
+import jadx.core.dex.visitors.SignatureProcessor;
 import jadx.core.dex.visitors.SimplifyVisitor;
 import jadx.core.dex.visitors.blocksmaker.BlockExceptionHandler;
 import jadx.core.dex.visitors.blocksmaker.BlockFinish;
@@ -78,6 +80,7 @@ public class Jadx {
 
 	public static List<IDexTreeVisitor> getPreDecompilePassesList() {
 		List<IDexTreeVisitor> passes = new ArrayList<>();
+		passes.add(new SignatureProcessor());
 		passes.add(new RenameVisitor());
 		passes.add(new UsageInfoVisitor());
 		return passes;
@@ -117,6 +120,7 @@ public class Jadx {
 			passes.add(new DebugInfoApplyVisitor());
 		}
 
+		passes.add(new InlineMethods());
 		passes.add(new GenericTypesVisitor());
 		passes.add(new ShadowFieldVisitor());
 		passes.add(new DeboxingVisitor());
@@ -142,8 +146,9 @@ public class Jadx {
 		passes.add(new FixAccessModifiers());
 		passes.add(new ProcessAnonymous());
 		passes.add(new ClassModifier());
-		passes.add(new MethodInlineVisitor());
 		passes.add(new LoopRegionVisitor());
+
+		passes.add(new MarkMethodsForInline());
 
 		passes.add(new ProcessVariables());
 		passes.add(new PrepareForCodeGen());

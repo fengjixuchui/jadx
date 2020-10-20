@@ -28,8 +28,6 @@ import jadx.api.ICodeInfo;
 import jadx.api.JadxArgs;
 import jadx.api.JadxDecompiler;
 import jadx.api.JadxInternalAccess;
-import jadx.core.ProcessClass;
-import jadx.core.codegen.CodeGen;
 import jadx.core.codegen.CodeWriter;
 import jadx.core.dex.attributes.AFlag;
 import jadx.core.dex.attributes.AType;
@@ -40,6 +38,7 @@ import jadx.core.dex.nodes.MethodNode;
 import jadx.core.dex.nodes.RootNode;
 import jadx.core.utils.DebugChecks;
 import jadx.core.utils.Utils;
+import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.core.utils.files.FileUtils;
 import jadx.core.xmlgen.ResourceStorage;
 import jadx.core.xmlgen.entry.ResourceEntry;
@@ -189,11 +188,10 @@ public abstract class IntegrationTest extends TestUtils {
 	}
 
 	protected void decompileAndCheck(JadxDecompiler d, List<ClassNode> clsList) {
-		if (unloadCls) {
-			clsList.forEach(ClassNode::decompile);
-		} else {
-			clsList.forEach(cls -> decompileWithoutUnload(d, cls));
+		if (!unloadCls) {
+			clsList.forEach(cls -> cls.add(AFlag.DONT_UNLOAD_CLASS));
 		}
+		clsList.forEach(ClassNode::decompile);
 
 		for (ClassNode cls : clsList) {
 			System.out.println("-----------------------------------------------------------");
@@ -248,22 +246,6 @@ public abstract class IntegrationTest extends TestUtils {
 			resStorage.add(new ResourceEntry(id, "", parts[0], parts[1]));
 		}
 		root.processResources(resStorage);
-	}
-
-	protected void decompileWithoutUnload(JadxDecompiler jadx, ClassNode cls) {
-		ProcessClass.process(cls);
-		generateClsCode(cls);
-		// don't unload class
-	}
-
-	protected void generateClsCode(ClassNode cls) {
-		try {
-			ICodeInfo code = CodeGen.generate(cls);
-			cls.root().getCodeCache().add(cls.getTopParentClass().getRawName(), code);
-		} catch (Exception e) {
-			e.printStackTrace();
-			fail(e.getMessage());
-		}
 	}
 
 	protected void checkCode(ClassNode cls) {
@@ -322,17 +304,18 @@ public abstract class IntegrationTest extends TestUtils {
 			}
 			try {
 				limitExecTime(() -> checkMth.invoke(origCls.getConstructor().newInstance()));
-			} catch (Exception e) {
-				rethrow("Original check failed", e);
+				System.out.println("Source check: PASSED");
+			} catch (Throwable e) {
+				throw new JadxRuntimeException("Source check failed", e);
 			}
 			// run 'check' method from decompiled class
 			if (compile) {
 				try {
 					limitExecTime(() -> invoke(cls, "check"));
-				} catch (Exception e) {
-					rethrow("Decompiled check failed", e);
+					System.out.println("Decompiled check: PASSED");
+				} catch (Throwable e) {
+					throw new JadxRuntimeException("Decompiled check failed", e);
 				}
-				System.out.println("Auto check: PASSED");
 			}
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -348,7 +331,7 @@ public abstract class IntegrationTest extends TestUtils {
 		} catch (TimeoutException ex) {
 			future.cancel(true);
 			rethrow("Execution timeout", ex);
-		} catch (Exception ex) {
+		} catch (Throwable ex) {
 			rethrow(ex.getMessage(), ex);
 		} finally {
 			executor.shutdownNow();
@@ -356,18 +339,15 @@ public abstract class IntegrationTest extends TestUtils {
 		return null;
 	}
 
-	private void rethrow(String msg, Throwable e) {
+	public static void rethrow(String msg, Throwable e) {
 		if (e instanceof InvocationTargetException) {
-			Throwable cause = e.getCause();
-			if (cause instanceof AssertionError) {
-				throw (AssertionError) cause;
-			} else {
-				fail(cause);
-			}
+			rethrow(msg, e.getCause());
 		} else if (e instanceof ExecutionException) {
 			rethrow(e.getMessage(), e.getCause());
+		} else if (e instanceof AssertionError) {
+			throw (AssertionError) e;
 		} else {
-			fail(msg, e);
+			throw new RuntimeException(msg, e);
 		}
 	}
 
