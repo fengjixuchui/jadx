@@ -1,8 +1,7 @@
 package jadx.core.xmlgen.entry;
 
-import java.io.BufferedInputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Paths;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,39 +12,43 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import jadx.core.dex.nodes.RootNode;
+import jadx.core.utils.android.TextResMapFile;
+import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.core.xmlgen.ParserConstants;
-import jadx.core.xmlgen.ResTableParser;
 
 public class ValuesParser extends ParserConstants {
 	private static final Logger LOG = LoggerFactory.getLogger(ValuesParser.class);
 
-	private static String[] androidStrings;
 	private static Map<Integer, String> androidResMap;
 
 	private final String[] strings;
 	private final Map<Integer, String> resMap;
 
-	public ValuesParser(RootNode root, String[] strings, Map<Integer, String> resMap) {
+	public ValuesParser(String[] strings, Map<Integer, String> resMap) {
 		this.strings = strings;
 		this.resMap = resMap;
 
-		if (androidStrings == null && androidResMap == null) {
-			try {
-				decodeAndroid(root);
-			} catch (Exception e) {
-				LOG.error("Failed to decode Android Resource file", e);
-			}
+		if (androidResMap == null) {
+			androidResMap = loadAndroidResMap();
 		}
 	}
 
-	private static void decodeAndroid(RootNode root) throws IOException {
-		try (InputStream inputStream = new BufferedInputStream(ValuesParser.class.getResourceAsStream("/resources.arsc"))) {
-			ResTableParser androidParser = new ResTableParser(root);
-			androidParser.decode(inputStream);
-			androidStrings = androidParser.getStrings();
-			androidResMap = androidParser.getResStorage().getResourcesNames();
+	private static Map<Integer, String> loadAndroidResMap() {
+		try {
+			URL resMapUrl = ValuesParser.class.getResource("/android/res-map.txt");
+			return TextResMapFile.read(Paths.get(resMapUrl.toURI()));
+		} catch (Exception e) {
+			throw new JadxRuntimeException("Failed to load android resource file", e);
 		}
+	}
+
+	@Nullable
+	public String getSimpleValueString(ResourceEntry ri) {
+		RawValue simpleValue = ri.getSimpleValue();
+		if (simpleValue == null) {
+			return null;
+		}
+		return decodeValue(simpleValue);
 	}
 
 	@Nullable

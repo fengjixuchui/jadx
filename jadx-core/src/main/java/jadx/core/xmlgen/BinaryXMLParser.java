@@ -56,7 +56,7 @@ public class BinaryXMLParser extends CommonBinaryParser {
 	private int namespaceDepth = 0;
 	private int[] resourceIds;
 
-	private RootNode rootNode;
+	private final RootNode rootNode;
 	private String appPackageName;
 
 	public BinaryXMLParser(RootNode rootNode) {
@@ -117,7 +117,7 @@ public class BinaryXMLParser extends CommonBinaryParser {
 					break;
 				case RES_STRING_POOL_TYPE:
 					strings = parseStringPoolNoType();
-					valuesParser = new ValuesParser(rootNode, strings, resNames);
+					valuesParser = new ValuesParser(strings, resNames);
 					break;
 				case RES_XML_RESOURCE_MAP_TYPE:
 					parseResourceMap();
@@ -280,13 +280,7 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		int attributeNS = is.readInt32();
 		int attributeName = is.readInt32();
 		int attributeRawValue = is.readInt32();
-		int attrValSize = is.readInt16();
-		if (attrValSize != 0x08) {
-			die("attrValSize != 0x08 not supported");
-		}
-		if (is.readInt8() != 0) {
-			die("res0 is not 0");
-		}
+		is.skip(3);
 		int attrValDataType = is.readInt8();
 		int attrValData = is.readInt32();
 

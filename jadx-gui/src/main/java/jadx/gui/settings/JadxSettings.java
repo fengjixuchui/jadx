@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -35,7 +36,7 @@ public class JadxSettings extends JadxCLIArgs {
 
 	private static final Path USER_HOME = Paths.get(System.getProperty("user.home"));
 	private static final int RECENT_PROJECTS_COUNT = 15;
-	private static final int CURRENT_SETTINGS_VERSION = 9;
+	private static final int CURRENT_SETTINGS_VERSION = 10;
 
 	private static final Font DEFAULT_FONT = new RSyntaxTextArea().getFont();
 
@@ -57,7 +58,7 @@ public class JadxSettings extends JadxCLIArgs {
 	protected String excludedPackages = "";
 	private boolean autoSaveProject = false;
 
-	private boolean showHeapUsageBar = true;
+	private boolean showHeapUsageBar = false;
 
 	private Map<String, WindowLocation> windowPos = new HashMap<>();
 	private int mainWindowExtendedState = JFrame.NORMAL;
@@ -152,8 +153,8 @@ public class JadxSettings extends JadxCLIArgs {
 		sync();
 	}
 
-	public Iterable<Path> getRecentProjects() {
-		return recentProjects;
+	public List<Path> getRecentProjects() {
+		return Collections.unmodifiableList(recentProjects);
 	}
 
 	public void addRecentProject(Path projectPath) {
@@ -194,11 +195,15 @@ public class JadxSettings extends JadxCLIArgs {
 	}
 
 	private static boolean isContainedInAnyScreen(WindowLocation pos) {
-		for (GraphicsDevice gd : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
-			if (gd.getDefaultConfiguration().getBounds().contains(pos.getBounds())) {
-				return true;
+		Rectangle bounds = pos.getBounds();
+		if (bounds.getX() > 0 && bounds.getY() > 0) {
+			for (GraphicsDevice gd : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+				if (gd.getDefaultConfiguration().getBounds().contains(bounds)) {
+					return true;
+				}
 			}
 		}
+		LOG.debug("Window saved position was ignored: {}", pos);
 		return false;
 	}
 
@@ -434,6 +439,10 @@ public class JadxSettings extends JadxCLIArgs {
 			fromVersion++;
 		}
 		if (fromVersion == 8) {
+			fromVersion++;
+		}
+		if (fromVersion == 9) {
+			showHeapUsageBar = false;
 			fromVersion++;
 		}
 		settingsVersion = CURRENT_SETTINGS_VERSION;

@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -68,9 +69,9 @@ import jadx.core.xmlgen.ResourcesSaver;
 public final class JadxDecompiler implements Closeable {
 	private static final Logger LOG = LoggerFactory.getLogger(JadxDecompiler.class);
 
-	private JadxArgs args;
-	private JadxPluginManager pluginManager = new JadxPluginManager();
-	private List<ILoadResult> loadedInputs = new ArrayList<>();
+	private final JadxArgs args;
+	private final JadxPluginManager pluginManager = new JadxPluginManager();
+	private final List<ILoadResult> loadedInputs = new ArrayList<>();
 
 	private RootNode root;
 	private List<JavaClass> classes;
@@ -210,7 +211,13 @@ public final class JadxDecompiler implements Closeable {
 	}
 
 	private void appendResourcesSave(ExecutorService executor, File outDir) {
+		Set<String> inputFileNames = args.getInputFiles().stream().map(File::getAbsolutePath).collect(Collectors.toSet());
 		for (ResourceFile resourceFile : getResources()) {
+			if (resourceFile.getType() != ResourceType.ARSC
+					&& inputFileNames.contains(resourceFile.getOriginalName())) {
+				// ignore resource made from input file
+				continue;
+			}
 			executor.execute(new ResourcesSaver(outDir, resourceFile));
 		}
 	}

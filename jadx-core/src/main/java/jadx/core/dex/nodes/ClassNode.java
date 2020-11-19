@@ -23,8 +23,9 @@ import jadx.api.plugins.input.data.annotations.IAnnotation;
 import jadx.core.Consts;
 import jadx.core.ProcessClass;
 import jadx.core.dex.attributes.AFlag;
-import jadx.core.dex.attributes.FieldInitAttr;
 import jadx.core.dex.attributes.annotations.AnnotationsList;
+import jadx.core.dex.attributes.fldinit.FieldInitAttr;
+import jadx.core.dex.attributes.fldinit.FieldInitConstAttr;
 import jadx.core.dex.attributes.nodes.NotificationAttrNode;
 import jadx.core.dex.attributes.nodes.SourceFileAttr;
 import jadx.core.dex.info.AccessInfo;
@@ -164,19 +165,23 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 		for (FieldNode f : staticFields) {
 			if (f.getAccessFlags().isFinal()) {
 				// incorrect initialization will be removed if assign found in constructor
-				f.addAttr(FieldInitAttr.NULL_VALUE);
+				f.addAttr(FieldInitConstAttr.NULL_VALUE);
 			}
 		}
-		List<EncodedValue> values = cls.getStaticFieldInitValues();
-		int count = values.size();
-		if (count == 0 || count > staticFields.size()) {
-			return;
+		try {
+			List<EncodedValue> values = cls.getStaticFieldInitValues();
+			int count = values.size();
+			if (count == 0 || count > staticFields.size()) {
+				return;
+			}
+			for (int i = 0; i < count; i++) {
+				staticFields.get(i).addAttr(FieldInitAttr.constValue(values.get(i)));
+			}
+			// process const fields
+			root().getConstValues().processConstFields(this, staticFields);
+		} catch (Exception e) {
+			this.addWarnComment("Failed to load initial values for static fields", e);
 		}
-		for (int i = 0; i < count; i++) {
-			staticFields.get(i).addAttr(FieldInitAttr.constValue(values.get(i)));
-		}
-		// process const fields
-		root().getConstValues().processConstFields(this, staticFields);
 	}
 
 	private void addSourceFilenameAttr(String fileName) {
@@ -586,7 +591,7 @@ public class ClassNode extends NotificationAttrNode implements ILoadable, ICodeN
 	public void reloadAtCodegenStage() {
 		ClassNode topCls = this.getTopParentClass();
 		if (topCls.getLoadStage() == LoadStage.CODEGEN_STAGE) {
-			throw new JadxRuntimeException("Class not yet loaded at codegen stage");
+			throw new JadxRuntimeException("Class not yet loaded at codegen stage: " + topCls);
 		}
 		topCls.add(AFlag.RELOAD_AT_CODEGEN_STAGE);
 	}

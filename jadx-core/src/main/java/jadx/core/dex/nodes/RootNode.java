@@ -39,6 +39,8 @@ import jadx.core.utils.android.AndroidResourcesUtils;
 import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.core.xmlgen.ResTableParser;
 import jadx.core.xmlgen.ResourceStorage;
+import jadx.core.xmlgen.entry.ResourceEntry;
+import jadx.core.xmlgen.entry.ValuesParser;
 
 public class RootNode {
 	private static final Logger LOG = LoggerFactory.getLogger(RootNode.class);
@@ -131,13 +133,14 @@ public class RootNode {
 			return;
 		}
 		try {
-			ResourceStorage resStorage = ResourcesLoader.decodeStream(arsc, (size, is) -> {
-				ResTableParser parser = new ResTableParser(this);
-				parser.decode(is);
-				return parser.getResStorage();
+			ResTableParser parser = ResourcesLoader.decodeStream(arsc, (size, is) -> {
+				ResTableParser tableParser = new ResTableParser(this);
+				tableParser.decode(is);
+				return tableParser;
 			});
-			if (resStorage != null) {
-				processResources(resStorage);
+			if (parser != null) {
+				processResources(parser.getResStorage());
+				updateObfuscatedFiles(parser, resources);
 			}
 		} catch (Exception e) {
 			LOG.error("Failed to parse '.arsc' file", e);
@@ -160,6 +163,33 @@ public class RootNode {
 			}
 		} catch (Exception e) {
 			throw new JadxRuntimeException("Error loading jadx class set", e);
+		}
+	}
+
+	private void updateObfuscatedFiles(ResTableParser parser, List<ResourceFile> resources) {
+		if (args.isSkipResources()) {
+			return;
+		}
+		long start = System.currentTimeMillis();
+		int renamedCount = 0;
+		ResourceStorage resStorage = parser.getResStorage();
+		ValuesParser valuesParser = new ValuesParser(parser.getStrings(), resStorage.getResourcesNames());
+		Map<String, ResourceEntry> entryNames = new HashMap<>();
+		for (ResourceEntry resEntry : resStorage.getResources()) {
+			String val = valuesParser.getSimpleValueString(resEntry);
+			if (val != null) {
+				entryNames.put(val, resEntry);
+			}
+		}
+		for (ResourceFile resource : resources) {
+			ResourceEntry resEntry = entryNames.get(resource.getOriginalName());
+			if (resEntry != null) {
+				resource.setAlias(resEntry);
+				renamedCount++;
+			}
+		}
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Renamed obfuscated resources: {}, duration: {}ms", renamedCount, System.currentTimeMillis() - start);
 		}
 	}
 
@@ -404,6 +434,7 @@ public class RootNode {
 		return appPackage;
 	}
 
+	@Nullable
 	public ClassNode getAppResClass() {
 		return appResClass;
 	}

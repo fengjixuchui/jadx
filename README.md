@@ -2,7 +2,7 @@
 
 ## JADX
 
-[![Build Status](https://travis-ci.org/skylot/jadx.png?branch=master)](https://travis-ci.org/skylot/jadx)
+[![Build Status](https://travis-ci.com/skylot/jadx.svg?branch=master)](https://travis-ci.com/skylot/jadx)
 [![Code Coverage](https://codecov.io/gh/skylot/jadx/branch/master/graph/badge.svg)](https://codecov.io/gh/skylot/jadx)
 [![Alerts from lgtm.com](https://img.shields.io/lgtm/alerts/g/skylot/jadx.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/skylot/jadx/alerts/)
 [![SonarQube Bugs](https://sonarcloud.io/api/project_badges/measure?project=jadx&metric=bugs)](https://sonarcloud.io/dashboard?id=jadx)
@@ -117,9 +117,6 @@ To support this project you can:
   - Post thoughts about new features/optimizations that important to you
   - Submit decompilation issues, please read before proceed: [Open issue](CONTRIBUTING.md#Open-Issue)
   - Open pull request, please follow these rules: [Pull Request Process](CONTRIBUTING.md#Pull-Request-Process)
-
-### Related projects:
-- [PyJadx](https://github.com/romainthomas/pyjadx) - python binding for jadx by [@romainthomas](https://github.com/romainthomas)
 
 ---------------------------------------
 *Licensed under the Apache 2.0 License*

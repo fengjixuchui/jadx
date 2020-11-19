@@ -6,6 +6,7 @@ import java.util.Set;
 
 import jadx.core.dex.attributes.annotations.AnnotationsList;
 import jadx.core.dex.attributes.annotations.MethodParameters;
+import jadx.core.dex.attributes.fldinit.FieldInitAttr;
 import jadx.core.dex.attributes.nodes.DeclareVariablesAttr;
 import jadx.core.dex.attributes.nodes.EdgeInsnAttr;
 import jadx.core.dex.attributes.nodes.EnumClassAttr;
@@ -92,6 +93,8 @@ public class AType<T extends IAttribute> {
 	public static final AType<RegDebugInfoAttr> REG_DEBUG_INFO = new AType<>();
 
 	public static final Set<AType<?>> SKIP_ON_UNLOAD = new HashSet<>(Arrays.asList(
+			SOURCE_FILE,
+			FIELD_INIT,
 			FIELD_REPLACE,
 			METHOD_INLINE,
 			SKIP_MTH_ARGS));
