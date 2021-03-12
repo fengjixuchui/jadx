@@ -25,6 +25,7 @@ import com.beust.jcommander.Parameter;
 import jadx.api.JadxArgs;
 import jadx.cli.JadxCLIArgs;
 import jadx.cli.LogHelper;
+import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.gui.ui.MainWindow;
 import jadx.gui.ui.codearea.EditorTheme;
 import jadx.gui.utils.FontUtils;
@@ -36,12 +37,13 @@ public class JadxSettings extends JadxCLIArgs {
 
 	private static final Path USER_HOME = Paths.get(System.getProperty("user.home"));
 	private static final int RECENT_PROJECTS_COUNT = 15;
-	private static final int CURRENT_SETTINGS_VERSION = 10;
+	private static final int CURRENT_SETTINGS_VERSION = 11;
 
 	private static final Font DEFAULT_FONT = new RSyntaxTextArea().getFont();
 
 	static final Set<String> SKIP_FIELDS = new HashSet<>(Arrays.asList(
 			"files", "input", "outDir", "outDirSrc", "outDirRes", "outputFormat",
+			"deobfuscationMapFile",
 			"verbose", "quiet", "logLevel",
 			"printVersion", "printHelp"));
 
@@ -52,6 +54,7 @@ public class JadxSettings extends JadxCLIArgs {
 	private boolean checkForUpdates = false;
 	private List<Path> recentProjects = new ArrayList<>();
 	private String fontStr = "";
+	private String smaliFontStr = "";
 	private String editorThemePath = "";
 	private LangLocale langLocale = NLS.defaultLocale();
 	private boolean autoStartJobs = false;
@@ -62,6 +65,12 @@ public class JadxSettings extends JadxCLIArgs {
 
 	private Map<String, WindowLocation> windowPos = new HashMap<>();
 	private int mainWindowExtendedState = JFrame.NORMAL;
+	private boolean codeAreaLineWrap = false;
+	private int srhResourceSkipSize = 1000;
+	private String srhResourceFileExt = ".xml|.html|.js|.json|.txt";
+	private boolean keepCommonDialogOpen = false;
+	private boolean smaliAreaShowBytecode = false;
+
 	/**
 	 * UI setting: the width of the tree showing the classes, resources, ...
 	 */
@@ -157,7 +166,10 @@ public class JadxSettings extends JadxCLIArgs {
 		return Collections.unmodifiableList(recentProjects);
 	}
 
-	public void addRecentProject(Path projectPath) {
+	public void addRecentProject(@Nullable Path projectPath) {
+		if (projectPath == null) {
+			return;
+		}
 		recentProjects.remove(projectPath);
 		recentProjects.add(0, projectPath);
 		int count = recentProjects.size();
@@ -370,6 +382,27 @@ public class JadxSettings extends JadxCLIArgs {
 		}
 	}
 
+	public Font getSmaliFont() {
+		if (smaliFontStr.isEmpty()) {
+			return DEFAULT_FONT;
+		}
+		try {
+			return FontUtils.loadByStr(smaliFontStr);
+		} catch (Exception e) {
+			LOG.warn("Failed to load font: {} for smali, reset to default", smaliFontStr, e);
+			setSmaliFont(DEFAULT_FONT);
+			return DEFAULT_FONT;
+		}
+	}
+
+	public void setSmaliFont(@Nullable Font font) {
+		if (font == null) {
+			this.smaliFontStr = "";
+		} else {
+			this.smaliFontStr = FontUtils.convertToStr(font);
+		}
+	}
+
 	public void setLogLevel(LogHelper.LogLevelEnum level) {
 		this.logLevel = level;
 	}
@@ -389,6 +422,46 @@ public class JadxSettings extends JadxCLIArgs {
 	public void setMainWindowExtendedState(int mainWindowExtendedState) {
 		this.mainWindowExtendedState = mainWindowExtendedState;
 		partialSync(settings -> settings.mainWindowExtendedState = mainWindowExtendedState);
+	}
+
+	public void setCodeAreaLineWrap(boolean lineWrap) {
+		this.codeAreaLineWrap = lineWrap;
+	}
+
+	public boolean isCodeAreaLineWrap() {
+		return this.codeAreaLineWrap;
+	}
+
+	public int getSrhResourceSkipSize() {
+		return srhResourceSkipSize;
+	}
+
+	public void setSrhResourceSkipSize(int size) {
+		srhResourceSkipSize = size;
+	}
+
+	public String getSrhResourceFileExt() {
+		return srhResourceFileExt;
+	}
+
+	public void setSrhResourceFileExt(String all) {
+		srhResourceFileExt = all.trim();
+	}
+
+	public void setKeepCommonDialogOpen(boolean yes) {
+		keepCommonDialogOpen = yes;
+	}
+
+	public boolean getKeepCommonDialogOpen() {
+		return keepCommonDialogOpen;
+	}
+
+	public void setSmaliAreaShowBytecode(boolean yes) {
+		smaliAreaShowBytecode = yes;
+	}
+
+	public boolean getSmaliAreaShowBytecode() {
+		return smaliAreaShowBytecode;
 	}
 
 	private void upgradeSettings(int fromVersion) {
@@ -444,6 +517,15 @@ public class JadxSettings extends JadxCLIArgs {
 		if (fromVersion == 9) {
 			showHeapUsageBar = false;
 			fromVersion++;
+		}
+		if (fromVersion == 10) {
+			srhResourceSkipSize = 3;
+			srhResourceFileExt = ".xml|.html|.js|.json|.txt";
+			fontStr = fontStr.replace('-', '/');
+			fromVersion++;
+		}
+		if (fromVersion != CURRENT_SETTINGS_VERSION) {
+			throw new JadxRuntimeException("Incorrect settings upgrade");
 		}
 		settingsVersion = CURRENT_SETTINGS_VERSION;
 		sync();

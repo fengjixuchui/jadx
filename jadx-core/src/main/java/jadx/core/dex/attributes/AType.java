@@ -42,6 +42,9 @@ import jadx.core.dex.trycatch.SplitterBlockAttr;
 @SuppressWarnings("InstantiationOfUtilityClass")
 public class AType<T extends IAttribute> {
 
+	// class, method, field, insn
+	public static final AType<AttrList<String>> CODE_COMMENTS = new AType<>();
+
 	// class, method, field
 	public static final AType<AnnotationsList> ANNOTATION_LIST = new AType<>();
 	public static final AType<RenameReasonAttr> RENAME_REASON = new AType<>();
@@ -97,5 +100,6 @@ public class AType<T extends IAttribute> {
 			FIELD_INIT,
 			FIELD_REPLACE,
 			METHOD_INLINE,
+			METHOD_OVERRIDE,
 			SKIP_MTH_ARGS));
 }

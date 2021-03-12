@@ -1,6 +1,5 @@
 package jadx.plugins.input.dex.sections;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +13,7 @@ import jadx.api.plugins.input.data.IMethodData;
 import jadx.api.plugins.input.data.annotations.EncodedValue;
 import jadx.api.plugins.input.data.annotations.IAnnotation;
 import jadx.plugins.input.dex.sections.annotations.AnnotationsParser;
+import jadx.plugins.input.dex.smali.SmaliPrinter;
 import jadx.plugins.input.dex.utils.SmaliUtils;
 
 public class DexClassData implements IClassData {
@@ -175,12 +175,7 @@ public class DexClassData implements IClassData {
 			return Collections.emptyList();
 		}
 		in.absPos(staticValuesOff);
-		int count = in.readUleb128();
-		List<EncodedValue> list = new ArrayList<>(count);
-		for (int i = 0; i < count; i++) {
-			list.add(annotationsParser.parseEncodedValue(in));
-		}
-		return list;
+		return annotationsParser.parseEncodedArray(in);
 	}
 
 	@Override
@@ -197,6 +192,11 @@ public class DexClassData implements IClassData {
 	public String getDisassembledCode() {
 		byte[] dexBuf = in.getDexReader().getBuf().array();
 		return SmaliUtils.getSmaliCode(dexBuf, getClassDefOffset());
+	}
+
+	@Override
+	public String getDisassembledCodeV2() {
+		return SmaliPrinter.printClass(this);
 	}
 
 	@Override

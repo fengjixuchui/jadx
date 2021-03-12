@@ -81,6 +81,7 @@ import jadx.api.JadxArgs;
 import jadx.api.JavaClass;
 import jadx.api.JavaNode;
 import jadx.api.ResourceFile;
+import jadx.core.utils.StringUtils;
 import jadx.core.utils.Utils;
 import jadx.core.utils.files.FileUtils;
 import jadx.gui.JadxWrapper;
@@ -100,16 +101,20 @@ import jadx.gui.treemodel.JNode;
 import jadx.gui.treemodel.JPackage;
 import jadx.gui.treemodel.JResource;
 import jadx.gui.treemodel.JRoot;
+import jadx.gui.ui.codearea.AbstractCodeContentPanel;
 import jadx.gui.update.JadxUpdate;
 import jadx.gui.update.JadxUpdate.IUpdateCallback;
 import jadx.gui.update.data.Release;
 import jadx.gui.utils.CacheObject;
+import jadx.gui.utils.CodeUsageInfo;
 import jadx.gui.utils.FontUtils;
 import jadx.gui.utils.JumpPosition;
 import jadx.gui.utils.Link;
 import jadx.gui.utils.NLS;
 import jadx.gui.utils.SystemInfo;
 import jadx.gui.utils.UiUtils;
+import jadx.gui.utils.search.CommentsIndex;
+import jadx.gui.utils.search.TextSearchIndex;
 
 import static io.reactivex.internal.functions.Functions.EMPTY_RUNNABLE;
 import static jadx.gui.utils.FileUtils.fileNamesToPaths;
@@ -135,8 +140,10 @@ public class MainWindow extends JFrame {
 	private static final ImageIcon ICON_FLAT_PKG = UiUtils.openIcon("empty_logical_package_obj");
 	private static final ImageIcon ICON_SEARCH = UiUtils.openIcon("wand");
 	private static final ImageIcon ICON_FIND = UiUtils.openIcon("magnifier");
+	private static final ImageIcon ICON_COMMENT_SEARCH = UiUtils.openIcon("table_edit");
 	private static final ImageIcon ICON_BACK = UiUtils.openIcon("icon_back");
 	private static final ImageIcon ICON_FORWARD = UiUtils.openIcon("icon_forward");
+	private static final ImageIcon ICON_QUARK = UiUtils.openIcon("icon_quark");
 	private static final ImageIcon ICON_PREF = UiUtils.openIcon("wrench");
 	private static final ImageIcon ICON_DEOBF = UiUtils.openIcon("lock_edit");
 	private static final ImageIcon ICON_LOG = UiUtils.openIcon("report");
@@ -217,7 +224,7 @@ public class MainWindow extends JFrame {
 
 	private void handleSelectClassOption() {
 		if (settings.getCmdSelectClass() != null) {
-			JavaNode javaNode = wrapper.searchJavaClassByClassName(settings.getCmdSelectClass());
+			JavaNode javaNode = wrapper.searchJavaClassByFullAlias(settings.getCmdSelectClass());
 			if (javaNode == null) {
 				javaNode = wrapper.searchJavaClassByOrigClassName(settings.getCmdSelectClass());
 			}
@@ -228,7 +235,7 @@ public class MainWindow extends JFrame {
 				return;
 			}
 			JNode node = cacheObject.getNodeCache().makeFrom(javaNode);
-			tabbedPane.codeJump(new JumpPosition(node.getRootClass(), node.getLine()));
+			tabbedPane.codeJump(new JumpPosition(node.getRootClass(), node.getLine(), JumpPosition.getDefPos(node)));
 		}
 	}
 
@@ -273,7 +280,7 @@ public class MainWindow extends JFrame {
 		if (addFiles) {
 			exts = new String[] { "apk", "dex", "jar", "class", "smali", "zip", "aar", "arsc" };
 		} else {
-			exts = new String[] { JadxProject.PROJECT_EXTENSION, "apk", "dex", "jar", "class", "smali", "zip", "aar", "arsc" };
+			exts = new String[] { JadxProject.PROJECT_EXTENSION, "apk", "dex", "jar", "class", "smali", "zip", "aar", "arsc", "aab" };
 		}
 		String description = "Supported files: (" + Utils.arrayToStr(exts) + ')';
 
@@ -308,9 +315,10 @@ public class MainWindow extends JFrame {
 		if (!ensureProjectIsSaved()) {
 			return;
 		}
-		project = new JadxProject(settings);
-		update();
+		cancelBackgroundJobs();
 		clearTree();
+		wrapper.close();
+		updateProject(new JadxProject());
 	}
 
 	private void saveProject() {
@@ -353,6 +361,7 @@ public class MainWindow extends JFrame {
 				}
 			}
 			project.saveAs(path);
+			settings.addRecentProject(path);
 			update();
 		}
 	}
@@ -405,23 +414,32 @@ public class MainWindow extends JFrame {
 		if (!ensureProjectIsSaved()) {
 			return;
 		}
-		project = JadxProject.from(path, settings);
-		if (project == null) {
+		JadxProject jadxProject = JadxProject.from(path);
+		if (jadxProject == null) {
 			JOptionPane.showMessageDialog(
 					this,
 					NLS.str("msg.project_error"),
 					NLS.str("msg.project_error_title"),
 					JOptionPane.INFORMATION_MESSAGE);
-			return;
+			jadxProject = new JadxProject();
 		}
-		update();
+		updateProject(jadxProject);
 		settings.addRecentProject(path);
-		List<Path> filePaths = project.getFilePaths();
+		List<Path> filePaths = jadxProject.getFilePaths();
 		if (filePaths == null) {
 			clearTree();
 		} else {
 			open(filePaths);
 		}
+	}
+
+	public void updateProject(JadxProject jadxProject) {
+		jadxProject.setSettings(settings);
+		jadxProject.setMainWindow(this);
+		this.project = jadxProject;
+		this.wrapper.setProject(jadxProject);
+		this.cacheObject.setCommentsIndex(new CommentsIndex(wrapper, cacheObject, jadxProject));
+		update();
 	}
 
 	private void update() {
@@ -441,15 +459,14 @@ public class MainWindow extends JFrame {
 
 	protected void resetCache() {
 		cacheObject.reset();
-		// TODO: decompilation freezes sometime with several threads
+		cacheObject.setJRoot(treeRoot);
+		cacheObject.setJadxSettings(settings);
+
 		int threadsCount = settings.getThreadsCount();
 		cacheObject.setDecompileJob(new DecompileJob(wrapper, threadsCount));
 		cacheObject.setIndexJob(new IndexJob(wrapper, cacheObject, threadsCount));
-	}
-
-	public void resetIndex() {
-		int threadsCount = settings.getThreadsCount();
-		cacheObject.setIndexJob(new IndexJob(wrapper, cacheObject, threadsCount));
+		cacheObject.setUsageInfo(new CodeUsageInfo(cacheObject.getNodeCache()));
+		cacheObject.setTextIndex(new TextSearchIndex(this));
 	}
 
 	synchronized void runBackgroundJobs() {
@@ -466,7 +483,9 @@ public class MainWindow extends JFrame {
 	}
 
 	public synchronized void cancelBackgroundJobs() {
-		backgroundExecutor.cancelAll();
+		if (backgroundExecutor != null) {
+			backgroundExecutor.cancelAll();
+		}
 		if (backgroundWorker != null) {
 			backgroundWorker.stop();
 			backgroundWorker = new BackgroundWorker(cacheObject, progressPane);
@@ -513,7 +532,7 @@ public class MainWindow extends JFrame {
 				continue;
 			}
 			JNode newNode = cacheObject.getNodeCache().makeFrom(newClass);
-			tabbedPane.codeJump(new JumpPosition(newNode, position));
+			tabbedPane.codeJump(new JumpPosition(newNode, position, JumpPosition.getDefPos(newNode)));
 		}
 	}
 
@@ -559,6 +578,8 @@ public class MainWindow extends JFrame {
 		treeModel.setRoot(treeRoot);
 		treeRoot.update();
 		reloadTree();
+		cacheObject.setJRoot(treeRoot);
+		cacheObject.setJadxSettings(settings);
 	}
 
 	private void clearTree() {
@@ -642,12 +663,10 @@ public class MainWindow extends JFrame {
 				}
 			} else if (obj instanceof ApkSignature) {
 				tabbedPane.showSimpleNode((JNode) obj);
+			} else if (obj instanceof QuarkReport) {
+				tabbedPane.showSimpleNode((JNode) obj);
 			} else if (obj instanceof JNode) {
-				JNode node = (JNode) obj;
-				JClass cls = node.getRootClass();
-				if (cls != null) {
-					tabbedPane.codeJump(new JumpPosition(cls, node.getLine()));
-				}
+				tabbedPane.codeJump(new JumpPosition((JNode) obj));
 			}
 		} catch (Exception e) {
 			LOG.error("Content loading error", e);
@@ -655,8 +674,7 @@ public class MainWindow extends JFrame {
 	}
 
 	private void rename(JNode node) {
-		RenameDialog renameDialog = new RenameDialog(this, node);
-		renameDialog.setVisible(true);
+		RenameDialog.rename(this, node);
 	}
 
 	private void treeRightClickAction(MouseEvent e) {
@@ -813,7 +831,15 @@ public class MainWindow extends JFrame {
 		Action textSearchAction = new AbstractAction(NLS.str("menu.text_search"), ICON_SEARCH) {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				new SearchDialog(MainWindow.this, true).setVisible(true);
+				ContentPanel panel = tabbedPane.getSelectedCodePanel();
+				if (panel instanceof AbstractCodeContentPanel) {
+					String preferText = ((AbstractCodeContentPanel) panel).getCodeArea().getSelectedText();
+					if (!StringUtils.isEmpty(preferText)) {
+						SearchDialog.searchText(MainWindow.this, preferText);
+						return;
+					}
+				}
+				SearchDialog.search(MainWindow.this, SearchDialog.SearchPreset.TEXT);
 			}
 		};
 		textSearchAction.putValue(Action.SHORT_DESCRIPTION, NLS.str("menu.text_search"));
@@ -823,11 +849,21 @@ public class MainWindow extends JFrame {
 		Action clsSearchAction = new AbstractAction(NLS.str("menu.class_search"), ICON_FIND) {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				new SearchDialog(MainWindow.this, false).setVisible(true);
+				SearchDialog.search(MainWindow.this, SearchDialog.SearchPreset.CLASS);
 			}
 		};
 		clsSearchAction.putValue(Action.SHORT_DESCRIPTION, NLS.str("menu.class_search"));
 		clsSearchAction.putValue(Action.ACCELERATOR_KEY, getKeyStroke(KeyEvent.VK_N, UiUtils.ctrlButton()));
+
+		Action commentSearchAction = new AbstractAction(NLS.str("menu.comment_search"), ICON_COMMENT_SEARCH) {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				SearchDialog.search(MainWindow.this, SearchDialog.SearchPreset.COMMENT);
+			}
+		};
+		commentSearchAction.putValue(Action.SHORT_DESCRIPTION, NLS.str("menu.comment_search"));
+		commentSearchAction.putValue(Action.ACCELERATOR_KEY, getKeyStroke(KeyEvent.VK_SEMICOLON,
+				UiUtils.ctrlButton() | KeyEvent.SHIFT_DOWN_MASK));
 
 		Action deobfAction = new AbstractAction(NLS.str("menu.deobfuscation"), ICON_DEOBF) {
 			@Override
@@ -870,8 +906,7 @@ public class MainWindow extends JFrame {
 			}
 		};
 		backAction.putValue(Action.SHORT_DESCRIPTION, NLS.str("nav.back"));
-		backAction.putValue(Action.ACCELERATOR_KEY, getKeyStroke(KeyEvent.VK_LEFT,
-				UiUtils.ctrlButton() | KeyEvent.ALT_DOWN_MASK));
+		backAction.putValue(Action.ACCELERATOR_KEY, getKeyStroke(KeyEvent.VK_ESCAPE, 0));
 
 		Action forwardAction = new AbstractAction(NLS.str("nav.forward"), ICON_FORWARD) {
 			@Override
@@ -880,8 +915,15 @@ public class MainWindow extends JFrame {
 			}
 		};
 		forwardAction.putValue(Action.SHORT_DESCRIPTION, NLS.str("nav.forward"));
-		forwardAction.putValue(Action.ACCELERATOR_KEY, getKeyStroke(KeyEvent.VK_RIGHT,
-				UiUtils.ctrlButton() | KeyEvent.ALT_DOWN_MASK));
+		forwardAction.putValue(Action.ACCELERATOR_KEY, getKeyStroke(KeyEvent.VK_RIGHT, KeyEvent.ALT_DOWN_MASK));
+
+		Action quarkAction = new AbstractAction("Quark Engine", ICON_QUARK) {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				new QuarkDialog(MainWindow.this).setVisible(true);
+			}
+		};
+		quarkAction.putValue(Action.SHORT_DESCRIPTION, "Quark Engine");
 
 		JMenu file = new JMenu(NLS.str("menu.file"));
 		file.setMnemonic(KeyEvent.VK_F);
@@ -911,6 +953,7 @@ public class MainWindow extends JFrame {
 		nav.setMnemonic(KeyEvent.VK_N);
 		nav.add(textSearchAction);
 		nav.add(clsSearchAction);
+		nav.add(commentSearchAction);
 		nav.addSeparator();
 		nav.add(backAction);
 		nav.add(forwardAction);
@@ -955,6 +998,7 @@ public class MainWindow extends JFrame {
 		toolbar.addSeparator();
 		toolbar.add(textSearchAction);
 		toolbar.add(clsSearchAction);
+		toolbar.add(commentSearchAction);
 		toolbar.addSeparator();
 		toolbar.add(backAction);
 		toolbar.add(forwardAction);
@@ -964,6 +1008,8 @@ public class MainWindow extends JFrame {
 		toolbar.add(logAction);
 		toolbar.addSeparator();
 		toolbar.add(prefsAction);
+		toolbar.addSeparator();
+		toolbar.add(quarkAction);
 		toolbar.addSeparator();
 		toolbar.add(Box.createHorizontalGlue());
 		toolbar.add(updateLink);
@@ -1188,6 +1234,10 @@ public class MainWindow extends JFrame {
 		return wrapper;
 	}
 
+	public JadxProject getProject() {
+		return project;
+	}
+
 	public TabbedPane getTabbedPane() {
 		return tabbedPane;
 	}
@@ -1210,6 +1260,10 @@ public class MainWindow extends JFrame {
 
 	public ProgressPanel getProgressPane() {
 		return progressPane;
+	}
+
+	public JRoot getTreeRoot() {
+		return treeRoot;
 	}
 
 	private class RecentProjectsMenuListener implements MenuListener {

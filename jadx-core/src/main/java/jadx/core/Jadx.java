@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import jadx.api.JadxArgs;
+import jadx.core.dex.visitors.AttachCommentsVisitor;
 import jadx.core.dex.visitors.AttachMethodDetails;
 import jadx.core.dex.visitors.AttachTryCatchVisitor;
 import jadx.core.dex.visitors.ClassModifier;
@@ -71,8 +72,9 @@ public class Jadx {
 	}
 
 	public static List<IDexTreeVisitor> getFallbackPassesList() {
-		List<IDexTreeVisitor> passes = new ArrayList<>(3);
+		List<IDexTreeVisitor> passes = new ArrayList<>();
 		passes.add(new AttachTryCatchVisitor());
+		passes.add(new AttachCommentsVisitor());
 		passes.add(new ProcessInstructionsVisitor());
 		passes.add(new FallbackModeVisitor());
 		return passes;
@@ -81,6 +83,8 @@ public class Jadx {
 	public static List<IDexTreeVisitor> getPreDecompilePassesList() {
 		List<IDexTreeVisitor> passes = new ArrayList<>();
 		passes.add(new SignatureProcessor());
+		passes.add(new OverrideMethodVisitor());
+		passes.add(new ProcessAnonymous());
 		passes.add(new RenameVisitor());
 		passes.add(new UsageInfoVisitor());
 		return passes;
@@ -96,6 +100,7 @@ public class Jadx {
 			passes.add(new DebugInfoAttachVisitor());
 		}
 		passes.add(new AttachTryCatchVisitor());
+		passes.add(new AttachCommentsVisitor());
 		passes.add(new ProcessInstructionsVisitor());
 
 		passes.add(new BlockSplitter());
@@ -107,7 +112,6 @@ public class Jadx {
 		passes.add(new BlockFinish());
 
 		passes.add(new AttachMethodDetails());
-		passes.add(new OverrideMethodVisitor());
 
 		passes.add(new SSATransform());
 		passes.add(new MoveInlineVisitor());
@@ -144,7 +148,6 @@ public class Jadx {
 		passes.add(new EnumVisitor());
 		passes.add(new ExtractFieldInit());
 		passes.add(new FixAccessModifiers());
-		passes.add(new ProcessAnonymous());
 		passes.add(new ClassModifier());
 		passes.add(new LoopRegionVisitor());
 

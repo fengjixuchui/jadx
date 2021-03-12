@@ -10,6 +10,7 @@ import jadx.api.JavaClass;
 import jadx.api.JavaField;
 import jadx.api.JavaMethod;
 import jadx.api.JavaNode;
+import jadx.core.dex.attributes.AFlag;
 import jadx.core.dex.info.AccessInfo;
 import jadx.gui.utils.NLS;
 import jadx.gui.utils.UiUtils;
@@ -48,6 +49,11 @@ public class JClass extends JLoadableNode {
 	@Override
 	public void loadNode() {
 		getRootClass().load();
+	}
+
+	@Override
+	public boolean canRename() {
+		return !cls.getClassNode().contains(AFlag.DONT_RENAME);
 	}
 
 	public synchronized void load() {
@@ -99,6 +105,10 @@ public class JClass extends JLoadableNode {
 	@Override
 	public String getSmali() {
 		return cls.getSmali();
+	}
+
+	public String getSmaliV2() {
+		return cls.getClassNode().getSmaliV2();
 	}
 
 	@Override
